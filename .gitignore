@@ -1,0 +1,62 @@
+# IDE specific files
+.vscode/
+
+# Data directory
+data/
+
+# Figures output
+figures/
+
+# Julia specific files
+*.jl.cov
+*.jl.*.cov
+*.jl.mem
+deps/deps.jl
+Manifest.toml
+benchmarks/Manifest.toml
+examples/Manifest.toml
+**/.ipynb_checkpoints
+**/.DS_Store
+
+# Common temp files
+*.swp
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# NetCDF data files
+*.nc
+*.nc4
+
+# PlaSim data directory
+scripts/PlaSim/PlaSim_data/
+
+# Other large data formats
+*.dat
+*.csv
+*.h5
+*.hdf5
+*.mat
+*.jld
+*.jld2
+
+# Figures and image outputs (ignore globally)
+*.png
+*.jpg
+*.jpeg
+*.svg
+*.eps
+*.tif
+*.tiff
+*.gif
+*.pdf
+
+# Additional binary/data formats
+*.bson
