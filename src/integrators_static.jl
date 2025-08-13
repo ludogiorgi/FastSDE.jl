@@ -254,6 +254,24 @@ function evolve_static(
     rng::Union{Nothing,AbstractRNG} = nothing,
     verbose::Bool = false,
 )
+    local_rng = rng === nothing ? Random.MersenneTwister(seed) : rng
+    return _evolve_static_typed(u0, dt, Nsteps, f!, sigma, local_rng;
+                                resolution=resolution, timestepper=timestepper,
+                                boundary=boundary, verbose=verbose)
+end
+
+function _evolve_static_typed(
+    u0,
+    dt,
+    Nsteps,
+    f!,
+    sigma,
+    rng::R;
+    resolution::Integer = 1,
+    timestepper::Symbol = :rk4,
+    boundary::Union{Nothing,Tuple} = nothing,
+    verbose::Bool = false,
+) where {R<:AbstractRNG}
     N = length(u0)
     T = promote_type(eltype(u0), typeof(dt))
 
@@ -268,14 +286,15 @@ function evolve_static(
     z = MVector{N,T}(undef)    # correlated noise temporary
 
     ts = (timestepper === :rk4 ? :rk4 : :euler)
-    rng = rng === nothing ? Random.MersenneTwister(seed) : rng
     s = sqrt(T(dt))
     t = zero(T)
     noise! = _make_noise_applier_static(sigma, u, t)
 
     Nsave = fld(Nsteps, resolution)
     results = Array{T}(undef, N, Nsave + 1)
-    @views results[:, 1] .= u0
+    @inbounds for i in 1:N
+        results[i, 1] = u0[i]
+    end
     save_idx = 1
 
     if boundary === nothing
@@ -289,7 +308,9 @@ function evolve_static(
             t += dt
             if step % resolution == 0
                 save_idx += 1
-                @views results[:, save_idx] .= u
+                @inbounds for i in 1:N
+                    results[i, save_idx] = u[i]
+                end
             end
         end
     else
@@ -311,7 +332,9 @@ function evolve_static(
             end
             if step % resolution == 0
                 save_idx += 1
-                @views results[:, save_idx] .= u
+                @inbounds for i in 1:N
+                    results[i, save_idx] = u[i]
+                end
             end
         end
         if verbose
@@ -346,9 +369,11 @@ function evolve_ens_static(
     results = Array{T}(undef, N, Nsave + 1, n_ens)
 
     Threads.@threads :dynamic for ens_idx in 1:n_ens
-        local_rng = rng === nothing ? Random.MersenneTwister(seed + ens_idx * 1000) : Random.MersenneTwister(rand(rng, UInt))
+        local_rng = rng === nothing ? Random.MersenneTwister(seed + ens_idx * 1000) : Random.MersenneTwister(rand(Random.default_rng(), UInt))
         u = MVector{N,T}(u0)
-        @views results[:, 1, ens_idx] .= u0
+        @inbounds for i in 1:N
+            results[i, 1, ens_idx] = u0[i]
+        end
         ts = (timestepper === :rk4 ? :rk4 : :euler)
         t = zero(T)
         save_idx = 1
@@ -374,7 +399,9 @@ function evolve_ens_static(
                 t += dt
                 if step % resolution == 0
                     save_idx += 1
-                    @views results[:, save_idx, ens_idx] .= u
+                    @inbounds for i in 1:N
+                        results[i, save_idx, ens_idx] = u[i]
+                    end
                 end
             end
         else
@@ -396,7 +423,9 @@ function evolve_ens_static(
                 end
                 if step % resolution == 0
                     save_idx += 1
-                    @views results[:, save_idx, ens_idx] .= u
+                    @inbounds for i in 1:N
+                        results[i, save_idx, ens_idx] = u[i]
+                    end
                 end
             end
             if verbose && ens_idx == 1
