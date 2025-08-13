@@ -181,21 +181,31 @@ _make_sigma_static(sigma::AbstractVector) = (u, t) -> sigma
 _make_sigma_static(sigma::AbstractMatrix) = (u, t) -> sigma
 
 # Build monomorphic noise applier for static forms (Real, SVector, SMatrix)
-function _make_noise_applier_static(sigma_any, u0::MVector{N,T}, t0::T) where {N,T}
-    # In-place sigma! detection for vector/matrix forms (robust via `applicable`)
+function _make_noise_applier_static(sigma_any, u0::MVector{N,T}, t0::T; sigma_inplace::Bool=false) where {N,T}
+    # In-place sigma! detection for vector/matrix forms (robust try-call). Always attempt once.
     if sigma_any isa Function
         σ_probe = MVector{N,T}(undef)
-        if applicable(sigma_any, σ_probe, u0, t0)
+        try
+            sigma_any(σ_probe, u0, t0)
             return (u, s, t, rng, ξ, tmp) -> begin
                 sigma_any(σ_probe, u, t)
                 add_noise_static!(u, s, σ_probe, rng, ξ)
             end
+        catch err
+            if !(err isa MethodError)
+                rethrow()
+            end
         end
         Σ_probe = MMatrix{N,N,T}(undef)
-        if applicable(sigma_any, Σ_probe, u0, t0)
+        try
+            sigma_any(Σ_probe, u0, t0)
             return (u, s, t, rng, ξ, tmp) -> begin
                 sigma_any(Σ_probe, u, t)
                 add_noise_static!(u, s, Σ_probe, rng, ξ, tmp)
+            end
+        catch err
+            if !(err isa MethodError)
+                rethrow()
             end
         end
     end
@@ -253,11 +263,12 @@ function evolve_static(
     boundary::Union{Nothing,Tuple} = nothing,
     rng::Union{Nothing,AbstractRNG} = nothing,
     verbose::Bool = false,
+    sigma_inplace::Bool=false,
 )
     local_rng = rng === nothing ? Random.MersenneTwister(seed) : rng
     return _evolve_static_typed(u0, dt, Nsteps, f!, sigma, local_rng;
                                 resolution=resolution, timestepper=timestepper,
-                                boundary=boundary, verbose=verbose)
+                                boundary=boundary, verbose=verbose, sigma_inplace=sigma_inplace)
 end
 
 function _evolve_static_typed(
@@ -271,6 +282,7 @@ function _evolve_static_typed(
     timestepper::Symbol = :rk4,
     boundary::Union{Nothing,Tuple} = nothing,
     verbose::Bool = false,
+    sigma_inplace::Bool=false,
 ) where {R<:AbstractRNG}
     N = length(u0)
     T = promote_type(eltype(u0), typeof(dt))
@@ -288,7 +300,7 @@ function _evolve_static_typed(
     ts = (timestepper === :rk4 ? :rk4 : :euler)
     s = sqrt(T(dt))
     t = zero(T)
-    noise! = _make_noise_applier_static(sigma, u, t)
+    noise! = _make_noise_applier_static(sigma, u, t; sigma_inplace=sigma_inplace)
 
     Nsave = fld(Nsteps, resolution)
     results = Array{T}(undef, N, Nsave + 1)
@@ -362,6 +374,7 @@ function evolve_ens_static(
     n_ens::Integer = 1,
     rng::Union{Nothing,AbstractRNG} = nothing,
     verbose::Bool = false,
+    sigma_inplace::Bool=false,
 )
     N = length(u0)
     T = promote_type(eltype(u0), typeof(dt))
@@ -386,7 +399,7 @@ function evolve_ens_static(
         tmp = MVector{N,T}(undef)
         ξ = MVector{N,T}(undef)
         z = MVector{N,T}(undef)
-        noise! = _make_noise_applier_static(sigma, u, t)
+        noise! = _make_noise_applier_static(sigma, u, t; sigma_inplace=sigma_inplace)
 
         if boundary === nothing
             @inbounds for step in 1:Nsteps

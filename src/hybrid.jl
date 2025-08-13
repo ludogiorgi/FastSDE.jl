@@ -30,11 +30,12 @@ function evolve(u0::AbstractVector, dt, Nsteps::Integer, f!, sigma;
                 seed::Integer=123, resolution::Integer=1,
                 timestepper::Symbol=:rk4, boundary::Union{Nothing,Tuple}=nothing,
                 n_ens::Integer=1, rng::Union{Nothing,AbstractRNG}=nothing,
-                verbose::Bool=false, flatten::Bool=true, manage_blas_threads::Bool=true)
+                verbose::Bool=false, flatten::Bool=true, manage_blas_threads::Bool=true,
+                sigma_inplace::Bool=false)
 
     N = length(u0)
     if n_ens != 1
-        arr = evolve_ens(u0, dt, Nsteps, f!, sigma; seed, resolution, timestepper, boundary, n_ens, rng, verbose, manage_blas_threads)
+        arr = evolve_ens(u0, dt, Nsteps, f!, sigma; seed, resolution, timestepper, boundary, n_ens, rng, verbose, manage_blas_threads, sigma_inplace=sigma_inplace)
         if flatten
             dim, timesteps, ensembles = size(arr)
             T = eltype(arr)
@@ -49,9 +50,9 @@ function evolve(u0::AbstractVector, dt, Nsteps::Integer, f!, sigma;
     end
 
     if N <= _STATIC_THRESHOLD[]
-        return evolve_static(u0, dt, Nsteps, f!, sigma; seed, resolution, timestepper, boundary, rng=rng, verbose=verbose)
+        return evolve_static(u0, dt, Nsteps, f!, sigma; seed, resolution, timestepper, boundary, rng=rng, verbose=verbose, sigma_inplace=sigma_inplace)
     else
-        return evolve_dyn(u0, dt, Nsteps, f!, sigma; seed, resolution, timestepper, boundary, rng=rng, verbose=verbose)
+        return evolve_dyn(u0, dt, Nsteps, f!, sigma; seed, resolution, timestepper, boundary, rng=rng, verbose=verbose, sigma_inplace=sigma_inplace)
     end
 end
 
@@ -65,7 +66,8 @@ function evolve_ens(u0::AbstractVector, dt, Nsteps::Integer, f!, sigma;
                     seed::Integer=123, resolution::Integer=1,
                     timestepper::Symbol=:rk4, boundary::Union{Nothing,Tuple}=nothing,
                     n_ens::Integer=1, rng::Union{Nothing,AbstractRNG}=nothing,
-                    verbose::Bool=false, manage_blas_threads::Bool=true)
+                    verbose::Bool=false, manage_blas_threads::Bool=true,
+                    sigma_inplace::Bool=false)
 
     N = length(u0)
 
@@ -79,9 +81,9 @@ function evolve_ens(u0::AbstractVector, dt, Nsteps::Integer, f!, sigma;
 
     try
         if N <= _STATIC_THRESHOLD[]
-            return evolve_ens_static(u0, dt, Nsteps, f!, sigma; seed, resolution, timestepper, boundary, n_ens, rng=rng, verbose=verbose)
+            return evolve_ens_static(u0, dt, Nsteps, f!, sigma; seed, resolution, timestepper, boundary, n_ens, rng=rng, verbose=verbose, sigma_inplace=sigma_inplace)
         else
-            return evolve_ens_dyn(u0, dt, Nsteps, f!, sigma; seed, resolution, timestepper, boundary, n_ens, rng=rng, verbose=verbose)
+            return evolve_ens_dyn(u0, dt, Nsteps, f!, sigma; seed, resolution, timestepper, boundary, n_ens, rng=rng, verbose=verbose, sigma_inplace=sigma_inplace)
         end
     finally
         if manage_blas_threads && n_ens > 1 && old_blas_threads !== nothing

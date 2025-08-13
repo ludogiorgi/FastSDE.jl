@@ -34,24 +34,34 @@ Accepted forms for `sigma` (dynamic path):
   - In-place function `sigma!(out, u, t)` writing a Vector or Matrix into `out`
     (avoids per-step allocations for high-dimensional problems)
 """
-function _make_noise_applier_dyn(sigma_any, u0, t0)
+function _make_noise_applier_dyn(sigma_any, u0, t0; sigma_inplace::Bool=false)
     # Detect in-place sigma! forms first to avoid probing with a call
     # that would allocate or error.
-    if sigma_any isa Function
+    if sigma_inplace && sigma_any isa Function
         T = typeof(t0)
         dim = length(u0)
         σ_vec = Vector{T}(undef, dim)
-        if applicable(sigma_any, σ_vec, u0, t0)
+        try
+            sigma_any(σ_vec, u0, t0)
             return (u, s, t, rng, noise_buf, tmp_vec) -> begin
                 sigma_any(σ_vec, u, t)
                 add_noise!(u, s, σ_vec, rng, noise_buf)
             end
+        catch err
+            if !(err isa MethodError)
+                rethrow()
+            end
         end
         Σ_mat = Matrix{T}(undef, dim, dim)
-        if applicable(sigma_any, Σ_mat, u0, t0)
+        try
+            sigma_any(Σ_mat, u0, t0)
             return (u, s, t, rng, noise_buf, tmp_vec) -> begin
                 sigma_any(Σ_mat, u, t)
                 add_noise!(u, s, Σ_mat, rng, noise_buf, tmp_vec)
+            end
+        catch err
+            if !(err isa MethodError)
+                rethrow()
             end
         end
     end
@@ -192,18 +202,20 @@ Dynamic-path single-trajectory integrator. Returns an array of size `(dim, Nsave
 function evolve_dyn(u0, dt, Nsteps, f!, sigma;
                     seed::Integer=123, resolution::Integer=1,
                     timestepper::Symbol=:rk4, boundary::Union{Nothing,Tuple}=nothing,
-                    rng::Union{Nothing,AbstractRNG}=nothing, verbose::Bool=false)
+                    rng::Union{Nothing,AbstractRNG}=nothing, verbose::Bool=false,
+                    sigma_inplace::Bool=false)
     local_rng = rng === nothing ? Random.MersenneTwister(seed) : rng
     return _evolve_dyn_typed(u0, dt, Nsteps, f!, sigma, local_rng;
                              resolution=resolution, timestepper=timestepper,
-                             boundary=boundary, verbose=verbose)
+                             boundary=boundary, verbose=verbose, sigma_inplace=sigma_inplace)
 end
 
 function _evolve_dyn_typed(u0, dt, Nsteps, f!, sigma, rng::R;
                            resolution::Integer=1,
                            timestepper::Symbol=:rk4,
                            boundary::Union{Nothing,Tuple}=nothing,
-                           verbose::Bool=false) where {R<:AbstractRNG}
+                           verbose::Bool=false,
+                           sigma_inplace::Bool=false) where {R<:AbstractRNG}
 
     dim   = length(u0)
     T     = promote_type(eltype(u0), typeof(dt))
@@ -219,7 +231,7 @@ function _evolve_dyn_typed(u0, dt, Nsteps, f!, sigma, rng::R;
     tmp_vec   = Vector{T}(undef, dim)
     k1 = similar(u, T); k2 = similar(u, T); k3 = similar(u, T); k4 = similar(u, T); tmp = similar(u, T)
     s = sqrt(T(dt))
-    noise! = _make_noise_applier_dyn(sigma, u, t)
+    noise! = _make_noise_applier_dyn(sigma, u, t; sigma_inplace=sigma_inplace)
 
     if boundary === nothing
         if ts === rk4_step!
@@ -328,7 +340,7 @@ function evolve_ens_dyn(u0, dt, Nsteps, f!, sigma;
         tmp_vec   = Vector{T}(undef, dim)
         k1 = similar(u, T); k2 = similar(u, T); k3 = similar(u, T); k4 = similar(u, T); tmp = similar(u, T)
         s = sqrt(T(dt))
-        noise! = _make_noise_applier_dyn(sigma, u, t)
+        noise! = _make_noise_applier_dyn(sigma, u, t; sigma_inplace=sigma_inplace)
 
         if boundary === nothing
             if ts === rk4_step!
