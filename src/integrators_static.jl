@@ -109,6 +109,25 @@ Add diagonal (per-component) Gaussian noise in-place to `u` with `σ_vec`.
 end
 
 """
+Add diagonal (per-component) Gaussian noise with in-place sigma! using MVector.
+"""
+@inline function add_noise_static!(
+    u::MVector{N,T},
+    s::T,
+    σ::MVector{N,T},
+    rng::AbstractRNG,
+    ξ::MVector{N,T},
+) where {N,T}
+    @inbounds for i in 1:N
+        ξ[i] = randn(rng)
+    end
+    @inbounds for i in 1:N
+        u[i] += s * (σ[i] * ξ[i])
+    end
+    return nothing
+end
+
+"""
     add_noise_static!(u, s, Σ, rng, ξ, tmp)
 
 Add correlated Gaussian noise in-place to `u` using covariance-factor `Σ`.
@@ -118,6 +137,27 @@ Temporary buffer `tmp` holds the correlated noise `Σ * ξ`.
     u::MVector{N,T},
     s::T,
     Σ::SMatrix{N,N,T},
+    rng::AbstractRNG,
+    ξ::MVector{N,T},
+    tmp::MVector{N,T},
+) where {N,T}
+    @inbounds for i in 1:N
+        ξ[i] = randn(rng)
+    end
+    tmp .= Σ * ξ
+    @inbounds for i in 1:N
+        u[i] += s * tmp[i]
+    end
+    return nothing
+end
+
+"""
+Add correlated Gaussian noise with in-place sigma! using MMatrix.
+"""
+@inline function add_noise_static!(
+    u::MVector{N,T},
+    s::T,
+    Σ::MMatrix{N,N,T},
     rng::AbstractRNG,
     ξ::MVector{N,T},
     tmp::MVector{N,T},
@@ -142,6 +182,21 @@ _make_sigma_static(sigma::AbstractMatrix) = (u, t) -> sigma
 
 # Build monomorphic noise applier for static forms (Real, SVector, SMatrix)
 function _make_noise_applier_static(sigma_any, u0::MVector{N,T}, t0::T) where {N,T}
+    # In-place sigma! detection for vector/matrix forms
+    if sigma_any isa Function && Base.hasmethod(sigma_any, Tuple{AbstractVector, Any, Any})
+        σ_buf = MVector{N,T}(undef)
+        return (u, s, t, rng, ξ, tmp) -> begin
+            sigma_any(σ_buf, u, t)
+            add_noise_static!(u, s, σ_buf, rng, ξ)
+        end
+    elseif sigma_any isa Function && Base.hasmethod(sigma_any, Tuple{AbstractMatrix, Any, Any})
+        Σ_buf = MMatrix{N,N,T}(undef)
+        return (u, s, t, rng, ξ, tmp) -> begin
+            sigma_any(Σ_buf, u, t)
+            add_noise_static!(u, s, Σ_buf, rng, ξ, tmp)
+        end
+    end
+
     # Fast-path: constant Vector/Matrix provided directly
     if sigma_any isa AbstractVector
         σ_const = SVector{N,T}(sigma_any)
@@ -195,9 +250,11 @@ function evolve_static(
     resolution::Integer = 1,
     timestepper::Symbol = :rk4,
     boundary::Union{Nothing,Tuple} = nothing,
+    rng::Union{Nothing,AbstractRNG} = nothing,
+    verbose::Bool = false,
 )
     N = length(u0)
-    T = promote_type(Float64, eltype(u0), typeof(dt))
+    T = promote_type(eltype(u0), typeof(dt))
 
     # Static state and buffers
     u = MVector{N,T}(u0)
@@ -210,7 +267,7 @@ function evolve_static(
     z = MVector{N,T}(undef)    # correlated noise temporary
 
     ts = (timestepper === :rk4 ? :rk4 : :euler)
-    rng = Random.MersenneTwister(seed)
+    rng = rng === nothing ? Random.MersenneTwister(seed) : rng
     s = sqrt(T(dt))
     t = zero(T)
     noise! = _make_noise_applier_static(sigma, u, t)
@@ -256,7 +313,9 @@ function evolve_static(
                 @views results[:, save_idx] .= u
             end
         end
-        println("Percentage of boundary crossings: ", count / Nsteps)
+        if verbose
+            println("Percentage of boundary crossings: ", count / Nsteps)
+        end
     end
     return results
 end
@@ -277,14 +336,16 @@ function evolve_ens_static(
     timestepper::Symbol = :rk4,
     boundary::Union{Nothing,Tuple} = nothing,
     n_ens::Integer = 1,
+    rng::Union{Nothing,AbstractRNG} = nothing,
+    verbose::Bool = false,
 )
     N = length(u0)
-    T = promote_type(Float64, eltype(u0), typeof(dt))
+    T = promote_type(eltype(u0), typeof(dt))
     Nsave = fld(Nsteps, resolution)
     results = Array{T}(undef, N, Nsave + 1, n_ens)
 
     Threads.@threads :dynamic for ens_idx in 1:n_ens
-        rng = Random.MersenneTwister(seed + ens_idx * 1000)
+        local_rng = rng === nothing ? Random.MersenneTwister(seed + ens_idx * 1000) : Random.MersenneTwister(rand(rng, UInt))
         u = MVector{N,T}(u0)
         @views results[:, 1, ens_idx] .= u0
         ts = (timestepper === :rk4 ? :rk4 : :euler)
@@ -308,7 +369,7 @@ function evolve_ens_static(
                 else
                     euler_step_static!(u, T(dt), f!, t, k1)
                 end
-                noise!(u, s, t, rng, ξ, z)
+                noise!(u, s, t, local_rng, ξ, z)
                 t += dt
                 if step % resolution == 0
                     save_idx += 1
@@ -324,7 +385,7 @@ function evolve_ens_static(
                 else
                     euler_step_static!(u, T(dt), f!, t, k1)
                 end
-                noise!(u, s, t, rng, ξ, z)
+                noise!(u, s, t, local_rng, ξ, z)
                 t += dt
                 if @inbounds any(u[i] < lo || u[i] > hi for i in 1:N)
                     @inbounds for i in 1:N
@@ -337,7 +398,7 @@ function evolve_ens_static(
                     @views results[:, save_idx, ens_idx] .= u
                 end
             end
-            if ens_idx == 1
+            if verbose && ens_idx == 1
                 println("Percentage of boundary crossings: ", count / Nsteps)
             end
         end

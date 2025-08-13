@@ -27,15 +27,43 @@ _make_sigma_dyn(sigma::AbstractMatrix) = (u, t) -> sigma
 
 """
 Build a monomorphic noise-applier closure specialized to the form of `sigma`.
+
+Accepted forms for `sigma` (dynamic path):
+  - Constant Real/Vector/Matrix
+  - Function `sigma(u, t)` returning Real/Vector/Matrix
+  - In-place function `sigma!(out, u, t)` writing a Vector or Matrix into `out`
+    (avoids per-step allocations for high-dimensional problems)
 """
 function _make_noise_applier_dyn(sigma_any, u0, t0)
+    # Detect in-place sigma! forms first to avoid probing with a call
+    # that would allocate or error.
+    if sigma_any isa Function && Base.hasmethod(sigma_any, Tuple{AbstractVector, Any, Any})
+        T = typeof(t0)
+        dim = length(u0)
+        σ_vec = Vector{T}(undef, dim)
+        return (u, s, t, rng, noise_buf, tmp_vec) -> begin
+            sigma_any(σ_vec, u, t)
+            add_noise!(u, s, σ_vec, rng, noise_buf)
+        end
+    elseif sigma_any isa Function && Base.hasmethod(sigma_any, Tuple{AbstractMatrix, Any, Any})
+        T = typeof(t0)
+        dim = length(u0)
+        Σ_mat = Matrix{T}(undef, dim, dim)
+        return (u, s, t, rng, noise_buf, tmp_vec) -> begin
+            sigma_any(Σ_mat, u, t)
+            add_noise!(u, s, Σ_mat, rng, noise_buf, tmp_vec)
+        end
+    end
+
+    # Fallback to existing API: constants or sigma(u,t) returning a value
     sigma = _make_sigma_dyn(sigma_any)
     sig0 = sigma(u0, t0)
-    if iszero(sig0)
-        return (u, s, t, rng, noise_buf, tmp_vec) -> nothing
-    elseif sig0 isa Real
+    if sig0 isa Real
         return (u, s, t, rng, noise_buf, tmp_vec) -> begin
             σ = sigma(u, t)::Real
+            if iszero(σ)
+                return
+            end
             add_noise!(u, s, σ, rng, noise_buf)
         end
     elseif sig0 isa AbstractVector
@@ -162,17 +190,18 @@ Dynamic-path single-trajectory integrator. Returns an array of size `(dim, Nsave
 """
 function evolve_dyn(u0, dt, Nsteps, f!, sigma;
                     seed::Integer=123, resolution::Integer=1,
-                    timestepper::Symbol=:rk4, boundary::Union{Nothing,Tuple}=nothing)
+                    timestepper::Symbol=:rk4, boundary::Union{Nothing,Tuple}=nothing,
+                    rng::Union{Nothing,AbstractRNG}=nothing, verbose::Bool=false)
 
     dim   = length(u0)
-    T     = promote_type(Float64, eltype(u0), typeof(dt))
+    T     = promote_type(eltype(u0), typeof(dt))
     Nsave = fld(Nsteps, resolution)
 
     u = copy(u0)
     results = Array{T}(undef, dim, Nsave+1)
     @views results[:, 1] .= u0
 
-    rng = Random.MersenneTwister(seed)
+    rng = rng === nothing ? Random.MersenneTwister(seed) : rng
     ts  = _resolve_stepper_dyn(timestepper)
     t = zero(T); save_index = 1
     noise_buf = Vector{T}(undef, dim)
@@ -255,7 +284,9 @@ function evolve_dyn(u0, dt, Nsteps, f!, sigma;
                 end
             end
         end
-        println("Percentage of boundary crossings: ", count / Nsteps)
+        if verbose
+            println("Percentage of boundary crossings: ", count / Nsteps)
+        end
     end
     return results
 end
@@ -268,15 +299,16 @@ Dynamic-path ensemble integrator. Returns an array of size `(dim, Nsave+1, n_ens
 function evolve_ens_dyn(u0, dt, Nsteps, f!, sigma;
                         seed::Integer=123, resolution::Integer=1,
                         timestepper::Symbol=:rk4, boundary::Union{Nothing,Tuple}=nothing,
-                        n_ens::Integer=1)
+                        n_ens::Integer=1, rng::Union{Nothing,AbstractRNG}=nothing,
+                        verbose::Bool=false)
 
     dim   = length(u0)
-    T     = promote_type(Float64, eltype(u0), typeof(dt))
+    T     = promote_type(eltype(u0), typeof(dt))
     Nsave = fld(Nsteps, resolution)
     results = Array{T}(undef, dim, Nsave+1, n_ens)
 
     Threads.@threads :dynamic for ens_idx in 1:n_ens
-        rng = Random.MersenneTwister(seed + ens_idx * 1000)
+        local_rng = rng === nothing ? Random.MersenneTwister(seed + ens_idx * 1000) : Random.MersenneTwister(rand(rng, UInt))
         u = copy(u0)
         @views results[:, 1, ens_idx] .= u0
         ts = _resolve_stepper_dyn(timestepper)
@@ -292,7 +324,7 @@ function evolve_ens_dyn(u0, dt, Nsteps, f!, sigma;
                 next_save = resolution
                 @inbounds for step in 1:Nsteps
                     rk4_step!(u, dt, f!, t, k1, k2, k3, k4, tmp)
-                    noise!(u, s, t, rng, noise_buf, tmp_vec)
+                    noise!(u, s, t, local_rng, noise_buf, tmp_vec)
                     t += dt
                     if step == next_save
                         save_index += 1
@@ -306,7 +338,7 @@ function evolve_ens_dyn(u0, dt, Nsteps, f!, sigma;
                 next_save = resolution
                 @inbounds for step in 1:Nsteps
                     euler_step!(u, dt, f!, t, k1)
-                    noise!(u, s, t, rng, noise_buf, tmp_vec)
+                    noise!(u, s, t, local_rng, noise_buf, tmp_vec)
                     t += dt
                     if step == next_save
                         save_index += 1
@@ -324,7 +356,7 @@ function evolve_ens_dyn(u0, dt, Nsteps, f!, sigma;
                 next_save = resolution
                 @inbounds for step in 1:Nsteps
                     rk4_step!(u, dt, f!, t, k1, k2, k3, k4, tmp)
-                    noise!(u, s, t, rng, noise_buf, tmp_vec)
+                    noise!(u, s, t, local_rng, noise_buf, tmp_vec)
                     t += dt
                     if crossed(u, lo, hi)
                         @inbounds @simd for i in 1:dim
@@ -344,7 +376,7 @@ function evolve_ens_dyn(u0, dt, Nsteps, f!, sigma;
                 next_save = resolution
                 @inbounds for step in 1:Nsteps
                     euler_step!(u, dt, f!, t, k1)
-                    noise!(u, s, t, rng, noise_buf, tmp_vec)
+                    noise!(u, s, t, local_rng, noise_buf, tmp_vec)
                     t += dt
                     if crossed(u, lo, hi)
                         @inbounds @simd for i in 1:dim
@@ -361,7 +393,7 @@ function evolve_ens_dyn(u0, dt, Nsteps, f!, sigma;
                     end
                 end
             end
-            if ens_idx == 1
+            if verbose && ens_idx == 1
                 println("Percentage of boundary crossings: ", count / Nsteps)
             end
         end

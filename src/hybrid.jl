@@ -29,25 +29,29 @@ otherwise the dynamic path. Returns an array of size `(dim, Nsave+1)`.
 function evolve(u0::AbstractVector, dt, Nsteps::Integer, f!, sigma;
                 seed::Integer=123, resolution::Integer=1,
                 timestepper::Symbol=:rk4, boundary::Union{Nothing,Tuple}=nothing,
-                n_ens::Integer=1)
+                n_ens::Integer=1, rng::Union{Nothing,AbstractRNG}=nothing,
+                verbose::Bool=false, flatten::Bool=true, manage_blas_threads::Bool=true)
 
     N = length(u0)
     if n_ens != 1
-        # Delegate to ensemble, then reshape to 2D for convenience
-        arr = evolve_ens(u0, dt, Nsteps, f!, sigma; seed, resolution, timestepper, boundary, n_ens)
-        dim, timesteps, ensembles = size(arr)
-        T = eltype(arr)
-        out = Array{T}(undef, dim, timesteps*ensembles)
-        @inbounds for i in 1:ensembles
-            @views out[:, (i-1)*timesteps+1 : i*timesteps] .= arr[:, :, i]
+        arr = evolve_ens(u0, dt, Nsteps, f!, sigma; seed, resolution, timestepper, boundary, n_ens, rng, verbose, manage_blas_threads)
+        if flatten
+            dim, timesteps, ensembles = size(arr)
+            T = eltype(arr)
+            out = Array{T}(undef, dim, timesteps*ensembles)
+            @inbounds for i in 1:ensembles
+                @views out[:, (i-1)*timesteps+1 : i*timesteps] .= arr[:, :, i]
+            end
+            return out
+        else
+            return arr
         end
-        return out
     end
 
     if N <= _STATIC_THRESHOLD[]
-        return evolve_static(u0, dt, Nsteps, f!, sigma; seed, resolution, timestepper, boundary)
+        return evolve_static(u0, dt, Nsteps, f!, sigma; seed, resolution, timestepper, boundary, rng=rng, verbose=verbose)
     else
-        return evolve_dyn(u0, dt, Nsteps, f!, sigma; seed, resolution, timestepper, boundary)
+        return evolve_dyn(u0, dt, Nsteps, f!, sigma; seed, resolution, timestepper, boundary, rng=rng, verbose=verbose)
     end
 end
 
@@ -60,26 +64,27 @@ otherwise the dynamic path. Returns an array of size `(dim, Nsave+1, n_ens)`.
 function evolve_ens(u0::AbstractVector, dt, Nsteps::Integer, f!, sigma;
                     seed::Integer=123, resolution::Integer=1,
                     timestepper::Symbol=:rk4, boundary::Union{Nothing,Tuple}=nothing,
-                    n_ens::Integer=1)
+                    n_ens::Integer=1, rng::Union{Nothing,AbstractRNG}=nothing,
+                    verbose::Bool=false, manage_blas_threads::Bool=true)
 
     N = length(u0)
 
     # When running ensembles across threads, disable BLAS threading to avoid
     # oversubscription and make full use of outer parallelism.
     old_blas_threads = nothing
-    if n_ens > 1
+    if manage_blas_threads && n_ens > 1
         old_blas_threads = LinearAlgebra.BLAS.get_num_threads()
         LinearAlgebra.BLAS.set_num_threads(1)
     end
 
     try
         if N <= _STATIC_THRESHOLD[]
-            return evolve_ens_static(u0, dt, Nsteps, f!, sigma; seed, resolution, timestepper, boundary, n_ens)
+            return evolve_ens_static(u0, dt, Nsteps, f!, sigma; seed, resolution, timestepper, boundary, n_ens, rng=rng, verbose=verbose)
         else
-            return evolve_ens_dyn(u0, dt, Nsteps, f!, sigma; seed, resolution, timestepper, boundary, n_ens)
+            return evolve_ens_dyn(u0, dt, Nsteps, f!, sigma; seed, resolution, timestepper, boundary, n_ens, rng=rng, verbose=verbose)
         end
     finally
-        if n_ens > 1 && old_blas_threads !== nothing
+        if manage_blas_threads && n_ens > 1 && old_blas_threads !== nothing
             LinearAlgebra.BLAS.set_num_threads(old_blas_threads)
         end
     end
