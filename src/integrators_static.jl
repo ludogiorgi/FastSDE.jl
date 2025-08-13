@@ -182,18 +182,21 @@ _make_sigma_static(sigma::AbstractMatrix) = (u, t) -> sigma
 
 # Build monomorphic noise applier for static forms (Real, SVector, SMatrix)
 function _make_noise_applier_static(sigma_any, u0::MVector{N,T}, t0::T) where {N,T}
-    # In-place sigma! detection for vector/matrix forms
-    if sigma_any isa Function && Base.hasmethod(sigma_any, Tuple{AbstractVector, Any, Any})
-        σ_buf = MVector{N,T}(undef)
-        return (u, s, t, rng, ξ, tmp) -> begin
-            sigma_any(σ_buf, u, t)
-            add_noise_static!(u, s, σ_buf, rng, ξ)
+    # In-place sigma! detection for vector/matrix forms (robust via `applicable`)
+    if sigma_any isa Function
+        σ_probe = MVector{N,T}(undef)
+        if applicable(sigma_any, σ_probe, u0, t0)
+            return (u, s, t, rng, ξ, tmp) -> begin
+                sigma_any(σ_probe, u, t)
+                add_noise_static!(u, s, σ_probe, rng, ξ)
+            end
         end
-    elseif sigma_any isa Function && Base.hasmethod(sigma_any, Tuple{AbstractMatrix, Any, Any})
-        Σ_buf = MMatrix{N,N,T}(undef)
-        return (u, s, t, rng, ξ, tmp) -> begin
-            sigma_any(Σ_buf, u, t)
-            add_noise_static!(u, s, Σ_buf, rng, ξ, tmp)
+        Σ_probe = MMatrix{N,N,T}(undef)
+        if applicable(sigma_any, Σ_probe, u0, t0)
+            return (u, s, t, rng, ξ, tmp) -> begin
+                sigma_any(Σ_probe, u, t)
+                add_noise_static!(u, s, Σ_probe, rng, ξ, tmp)
+            end
         end
     end
 
@@ -208,9 +211,7 @@ function _make_noise_applier_static(sigma_any, u0::MVector{N,T}, t0::T) where {N
 
     sigma = _make_sigma_static(sigma_any)
     sig0 = sigma(u0, t0)
-    if iszero(sig0)
-        return (u, s, t, rng, ξ, tmp) -> nothing
-    elseif sig0 isa Real
+    if sig0 isa Real
         return (u, s, t, rng, ξ, tmp) -> add_noise_static!(u, s, (sigma(u, t))::T, rng, ξ)
     elseif sig0 isa SVector{N,T}
         return (u, s, t, rng, ξ, tmp) -> add_noise_static!(u, s, (sigma(u, t))::SVector{N,T}, rng, ξ)

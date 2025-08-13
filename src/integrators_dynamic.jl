@@ -37,21 +37,22 @@ Accepted forms for `sigma` (dynamic path):
 function _make_noise_applier_dyn(sigma_any, u0, t0)
     # Detect in-place sigma! forms first to avoid probing with a call
     # that would allocate or error.
-    if sigma_any isa Function && Base.hasmethod(sigma_any, Tuple{AbstractVector, Any, Any})
+    if sigma_any isa Function
         T = typeof(t0)
         dim = length(u0)
         σ_vec = Vector{T}(undef, dim)
-        return (u, s, t, rng, noise_buf, tmp_vec) -> begin
-            sigma_any(σ_vec, u, t)
-            add_noise!(u, s, σ_vec, rng, noise_buf)
+        if applicable(sigma_any, σ_vec, u0, t0)
+            return (u, s, t, rng, noise_buf, tmp_vec) -> begin
+                sigma_any(σ_vec, u, t)
+                add_noise!(u, s, σ_vec, rng, noise_buf)
+            end
         end
-    elseif sigma_any isa Function && Base.hasmethod(sigma_any, Tuple{AbstractMatrix, Any, Any})
-        T = typeof(t0)
-        dim = length(u0)
         Σ_mat = Matrix{T}(undef, dim, dim)
-        return (u, s, t, rng, noise_buf, tmp_vec) -> begin
-            sigma_any(Σ_mat, u, t)
-            add_noise!(u, s, Σ_mat, rng, noise_buf, tmp_vec)
+        if applicable(sigma_any, Σ_mat, u0, t0)
+            return (u, s, t, rng, noise_buf, tmp_vec) -> begin
+                sigma_any(Σ_mat, u, t)
+                add_noise!(u, s, Σ_mat, rng, noise_buf, tmp_vec)
+            end
         end
     end
 
