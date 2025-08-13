@@ -63,9 +63,24 @@ function evolve_ens(u0::AbstractVector, dt, Nsteps::Integer, f!, sigma;
                     n_ens::Integer=1)
 
     N = length(u0)
-    if N <= _STATIC_THRESHOLD[]
-        return evolve_ens_static(u0, dt, Nsteps, f!, sigma; seed, resolution, timestepper, boundary, n_ens)
-    else
-        return evolve_ens_dyn(u0, dt, Nsteps, f!, sigma; seed, resolution, timestepper, boundary, n_ens)
+
+    # When running ensembles across threads, disable BLAS threading to avoid
+    # oversubscription and make full use of outer parallelism.
+    old_blas_threads = nothing
+    if n_ens > 1
+        old_blas_threads = LinearAlgebra.BLAS.get_num_threads()
+        LinearAlgebra.BLAS.set_num_threads(1)
+    end
+
+    try
+        if N <= _STATIC_THRESHOLD[]
+            return evolve_ens_static(u0, dt, Nsteps, f!, sigma; seed, resolution, timestepper, boundary, n_ens)
+        else
+            return evolve_ens_dyn(u0, dt, Nsteps, f!, sigma; seed, resolution, timestepper, boundary, n_ens)
+        end
+    finally
+        if n_ens > 1 && old_blas_threads !== nothing
+            LinearAlgebra.BLAS.set_num_threads(old_blas_threads)
+        end
     end
 end
