@@ -193,6 +193,17 @@ function evolve_dyn(u0, dt, Nsteps, f!, sigma;
                     seed::Integer=123, resolution::Integer=1,
                     timestepper::Symbol=:rk4, boundary::Union{Nothing,Tuple}=nothing,
                     rng::Union{Nothing,AbstractRNG}=nothing, verbose::Bool=false)
+    local_rng = rng === nothing ? Random.MersenneTwister(seed) : rng
+    return _evolve_dyn_typed(u0, dt, Nsteps, f!, sigma, local_rng;
+                             resolution=resolution, timestepper=timestepper,
+                             boundary=boundary, verbose=verbose)
+end
+
+function _evolve_dyn_typed(u0, dt, Nsteps, f!, sigma, rng::R;
+                           resolution::Integer=1,
+                           timestepper::Symbol=:rk4,
+                           boundary::Union{Nothing,Tuple}=nothing,
+                           verbose::Bool=false) where {R<:AbstractRNG}
 
     dim   = length(u0)
     T     = promote_type(eltype(u0), typeof(dt))
@@ -202,7 +213,6 @@ function evolve_dyn(u0, dt, Nsteps, f!, sigma;
     results = Array{T}(undef, dim, Nsave+1)
     @views results[:, 1] .= u0
 
-    rng = rng === nothing ? Random.MersenneTwister(seed) : rng
     ts  = _resolve_stepper_dyn(timestepper)
     t = zero(T); save_index = 1
     noise_buf = Vector{T}(undef, dim)
@@ -309,7 +319,7 @@ function evolve_ens_dyn(u0, dt, Nsteps, f!, sigma;
     results = Array{T}(undef, dim, Nsave+1, n_ens)
 
     Threads.@threads :dynamic for ens_idx in 1:n_ens
-        local_rng = rng === nothing ? Random.MersenneTwister(seed + ens_idx * 1000) : Random.MersenneTwister(rand(rng, UInt))
+        local_rng = rng === nothing ? Random.MersenneTwister(seed + ens_idx * 1000) : Random.MersenneTwister(rand(Random.default_rng(), UInt))
         u = copy(u0)
         @views results[:, 1, ens_idx] .= u0
         ts = _resolve_stepper_dyn(timestepper)
