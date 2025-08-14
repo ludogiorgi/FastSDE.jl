@@ -6,29 +6,32 @@ using StaticArrays
 using Random
 using LinearAlgebra: mul!
 
+# --- Call shims (params or no params) ---
+@inline _call_f!(f!, du, u, t, p) = (p === nothing ? f!(du, u, t) : f!(du, u, p, t))
+
 # --- Time steppers (in-place, static) ---
 
 """
-    rk4_step_static!(u, dt, f!, t, k1, k2, k3, k4, tmp)
+    rk4_step_static!(u, dt, f!, t, params, k1, k2, k3, k4, tmp)
 """
 @inline function rk4_step_static!(
-    u::MVector{N,T}, dt::T, f!, t::T,
+    u::MVector{N,T}, dt::T, f!, t::T, params,
     k1::MVector{N,T}, k2::MVector{N,T}, k3::MVector{N,T},
     k4::MVector{N,T}, tmp::MVector{N,T},
 ) where {N,T}
-    f!(k1, u, t)
+    _call_f!(f!, k1, u, t, params)
     @inbounds @simd for i in 1:N
         tmp[i] = u[i] + 0.5 * dt * k1[i]
     end
-    f!(k2, tmp, t + 0.5 * dt)
+    _call_f!(f!, k2, tmp, t + 0.5 * dt, params)
     @inbounds @simd for i in 1:N
         tmp[i] = u[i] + 0.5 * dt * k2[i]
     end
-    f!(k3, tmp, t + 0.5 * dt)
+    _call_f!(f!, k3, tmp, t + 0.5 * dt, params)
     @inbounds @simd for i in 1:N
         tmp[i] = u[i] + dt * k3[i]
     end
-    f!(k4, tmp, t + dt)
+    _call_f!(f!, k4, tmp, t + dt, params)
     @inbounds @simd for i in 1:N
         u[i] += (dt / 6) * (k1[i] + 2k2[i] + 2k3[i] + k4[i])
     end
@@ -36,19 +39,19 @@ using LinearAlgebra: mul!
 end
 
 """
-    rk2_step_static!(u, dt, f!, t, k1, k2, tmp)
+    rk2_step_static!(u, dt, f!, t, params, k1, k2, tmp)
 
 Second-order Runge–Kutta (midpoint) deterministic step.
 """
 @inline function rk2_step_static!(
-    u::MVector{N,T}, dt::T, f!, t::T,
+    u::MVector{N,T}, dt::T, f!, t::T, params,
     k1::MVector{N,T}, k2::MVector{N,T}, tmp::MVector{N,T},
 ) where {N,T}
-    f!(k1, u, t)
+    _call_f!(f!, k1, u, t, params)
     @inbounds @simd for i in 1:N
         tmp[i] = u[i] + 0.5 * dt * k1[i]
     end
-    f!(k2, tmp, t + 0.5 * dt)
+    _call_f!(f!, k2, tmp, t + 0.5 * dt, params)
     @inbounds @simd for i in 1:N
         u[i] += dt * k2[i]
     end
@@ -56,12 +59,12 @@ Second-order Runge–Kutta (midpoint) deterministic step.
 end
 
 """
-    euler_step_static!(u, dt, f!, t, k1)
+    euler_step_static!(u, dt, f!, t, params, k1)
 """
 @inline function euler_step_static!(
-    u::MVector{N,T}, dt::T, f!, t::T, k1::MVector{N,T},
+    u::MVector{N,T}, dt::T, f!, t::T, params, k1::MVector{N,T},
 ) where {N,T}
-    f!(k1, u, t)
+    _call_f!(f!, k1, u, t, params)
     @inbounds @simd for i in 1:N
         u[i] += dt * k1[i]
     end
@@ -70,7 +73,6 @@ end
 
 # --- Noise adders (static) ---
 
-# helper for SMatrix * MVector without temporaries
 @inline function _mulS!(y::MVector{N,T}, A::SMatrix{N,N,T}, x::MVector{N,T}) where {N,T}
     @inbounds for i in 1:N
         s = zero(T)
@@ -82,9 +84,6 @@ end
     return nothing
 end
 
-"""
-    add_noise_static!(u, s, σ::T, rng, ξ)
-"""
 @inline function add_noise_static!(
     u::MVector{N,T}, s::T, σ::T, rng::AbstractRNG, ξ::MVector{N,T},
 ) where {N,T}
@@ -95,9 +94,6 @@ end
     return nothing
 end
 
-"""
-    add_noise_static!(u, s, σ::SVector, rng, ξ)
-"""
 @inline function add_noise_static!(
     u::MVector{N,T}, s::T, σ::SVector{N,T}, rng::AbstractRNG, ξ::MVector{N,T},
 ) where {N,T}
@@ -108,9 +104,6 @@ end
     return nothing
 end
 
-"""
-    add_noise_static!(u, s, σ::MVector, rng, ξ)
-"""
 @inline function add_noise_static!(
     u::MVector{N,T}, s::T, σ::MVector{N,T}, rng::AbstractRNG, ξ::MVector{N,T},
 ) where {N,T}
@@ -121,30 +114,24 @@ end
     return nothing
 end
 
-"""
-    add_noise_static!(u, s, Σ::SMatrix, rng, ξ, tmp)
-"""
 @inline function add_noise_static!(
     u::MVector{N,T}, s::T, Σ::SMatrix{N,N,T},
     rng::AbstractRNG, ξ::MVector{N,T}, tmp::MVector{N,T},
 ) where {N,T}
     randn!(rng, ξ)
-    _mulS!(tmp, Σ, ξ)               # avoids Σ*ξ temporary
+    _mulS!(tmp, Σ, ξ)
     @inbounds @simd for i in 1:N
         u[i] += s * tmp[i]
     end
     return nothing
 end
 
-"""
-    add_noise_static!(u, s, Σ::MMatrix, rng, ξ, tmp)
-"""
 @inline function add_noise_static!(
     u::MVector{N,T}, s::T, Σ::MMatrix{N,N,T},
     rng::AbstractRNG, ξ::MVector{N,T}, tmp::MVector{N,T},
 ) where {N,T}
     randn!(rng, ξ)
-    mul!(tmp, Σ, ξ)                 # true BLASy mul!, no temporary
+    mul!(tmp, Σ, ξ)
     @inbounds @simd for i in 1:N
         u[i] += s * tmp[i]
     end
@@ -159,7 +146,8 @@ end
 @inline _make_sigma_static(sigma::AbstractVector) = (u, t) -> sigma
 @inline _make_sigma_static(sigma::AbstractMatrix) = (u, t) -> sigma
 
-# Build monomorphic noise applier (prefers in-place sigma!)
+# --- Noise applier builders ---
+
 function _make_noise_applier_static(sigma_any, u0::MVector{N,T}, t0::T;
                                     sigma_inplace::Bool=false) where {N,T}
     if sigma_any isa Function
@@ -216,22 +204,69 @@ function _make_noise_applier_static(sigma_any, u0::MVector{N,T}, t0::T;
     end
 end
 
+"""
+With-params builder (preferred when params ≠ nothing).
+Supports sigma!(out,u,p,t) and sigma(u,p,t).
+"""
+function _make_noise_applier_static_with_params(sigma_any, u0::MVector{N,T}, t0::T, params;
+                                                sigma_inplace::Bool=false) where {N,T}
+    if sigma_any isa Function
+        σ_probe = MVector{N,T}(undef)
+        try
+            sigma_any(σ_probe, u0, params, t0)     # sigma!(σ,u,p,t)
+            return (u, s, t, rng, ξ, tmp) -> begin
+                sigma_any(σ_probe, u, params, t)
+                add_noise_static!(u, s, σ_probe, rng, ξ)
+            end
+        catch err
+            if !(err isa MethodError); rethrow(); end
+        end
+        Σ_probe = MMatrix{N,N,T}(undef)
+        try
+            sigma_any(Σ_probe, u0, params, t0)     # sigma!(Σ,u,p,t)
+            return (u, s, t, rng, ξ, tmp) -> begin
+                sigma_any(Σ_probe, u, params, t)
+                add_noise_static!(u, s, Σ_probe, rng, ξ, tmp)
+            end
+        catch err
+            if !(err isa MethodError); rethrow(); end
+        end
+        # Returning form
+        try
+            sig0 = sigma_any(u0, params, t0)
+            if sig0 isa Real
+                return (u, s, t, rng, ξ, tmp) -> add_noise_static!(u, s, (sigma_any(u, params, t))::T, rng, ξ)
+            elseif sig0 isa SVector{N,T}
+                return (u, s, t, rng, ξ, tmp) -> add_noise_static!(u, s, (sigma_any(u, params, t))::SVector{N,T}, rng, ξ)
+            elseif sig0 isa SMatrix{N,N,T}
+                return (u, s, t, rng, ξ, tmp) -> add_noise_static!(u, s, (sigma_any(u, params, t))::SMatrix{N,N,T}, rng, ξ, tmp)
+            end
+        catch err
+            if !(err isa MethodError); rethrow(); end
+        end
+    end
+    # Fallback: no-params path
+    return _make_noise_applier_static(sigma_any, u0, t0; sigma_inplace=sigma_inplace)
+end
+
 # --- Public API: static path (internal) ---
 
 """
-    evolve_static(u0, dt, Nsteps, f!, sigma; resolution=1, timestepper=:rk4, boundary=nothing, seed=123)
+    evolve_static(u0, dt, Nsteps, f!, sigma; ...)
 """
 function evolve_static(u0, dt, Nsteps, f!, sigma;
+                       params::Any = nothing,                         # <-- NEW
                        seed::Integer=123, resolution::Integer=1,
                        timestepper::Symbol=:rk4, boundary::Union{Nothing,Tuple}=nothing,
                        rng::Union{Nothing,AbstractRNG}=nothing, verbose::Bool=false,
                        sigma_inplace::Bool=false)
     local_rng = rng === nothing ? Random.MersenneTwister(seed) : rng
     return _evolve_static_typed(u0, dt, Nsteps, f!, sigma, local_rng;
-                                resolution, timestepper, boundary, verbose, sigma_inplace)
+                                params=params, resolution, timestepper, boundary, verbose, sigma_inplace)
 end
 
 function _evolve_static_typed(u0, dt, Nsteps, f!, sigma, rng::R;
+                              params::Any = nothing,                         # <-- NEW
                               resolution::Integer=1, timestepper::Symbol=:rk4,
                               boundary::Union{Nothing,Tuple}=nothing, verbose::Bool=false,
                               sigma_inplace::Bool=false) where {R<:AbstractRNG}
@@ -247,7 +282,9 @@ function _evolve_static_typed(u0, dt, Nsteps, f!, sigma, rng::R;
 
     s = sqrt(T(dt))
     t = zero(T)
-    noise! = _make_noise_applier_static(sigma, u, t; sigma_inplace)
+    noise! = (params === nothing ?
+                _make_noise_applier_static(sigma, u, t; sigma_inplace=sigma_inplace) :
+                _make_noise_applier_static_with_params(sigma, u, t, params; sigma_inplace=sigma_inplace))
 
     Nsave = fld(Nsteps, resolution)
     results = Array{T}(undef, N, Nsave + 1)
@@ -260,7 +297,7 @@ function _evolve_static_typed(u0, dt, Nsteps, f!, sigma, rng::R;
     if boundary === nothing
         if timestepper === :rk4
             @inbounds for step in 1:Nsteps
-                rk4_step_static!(u, T(dt), f!, t, k1, k2, k3, k4, tmp)
+                rk4_step_static!(u, T(dt), f!, t, params, k1, k2, k3, k4, tmp)
                 noise!(u, s, t, rng, ξ, z)
                 t += dt
                 if step == next_save
@@ -273,7 +310,7 @@ function _evolve_static_typed(u0, dt, Nsteps, f!, sigma, rng::R;
             end
         elseif timestepper === :rk2
             @inbounds for step in 1:Nsteps
-                rk2_step_static!(u, T(dt), f!, t, k1, k2, tmp)
+                rk2_step_static!(u, T(dt), f!, t, params, k1, k2, tmp)
                 noise!(u, s, t, rng, ξ, z)
                 t += dt
                 if step == next_save
@@ -286,7 +323,7 @@ function _evolve_static_typed(u0, dt, Nsteps, f!, sigma, rng::R;
             end
         else
             @inbounds for step in 1:Nsteps
-                euler_step_static!(u, T(dt), f!, t, k1)
+                euler_step_static!(u, T(dt), f!, t, params, k1)
                 noise!(u, s, t, rng, ξ, z)
                 t += dt
                 if step == next_save
@@ -303,7 +340,7 @@ function _evolve_static_typed(u0, dt, Nsteps, f!, sigma, rng::R;
         count = 0
         if timestepper === :rk4
             @inbounds for step in 1:Nsteps
-                rk4_step_static!(u, T(dt), f!, t, k1, k2, k3, k4, tmp)
+                rk4_step_static!(u, T(dt), f!, t, params, k1, k2, k3, k4, tmp)
                 noise!(u, s, t, rng, ξ, z)
                 t += dt
                 if @inbounds any(u[i] < lo || u[i] > hi for i in 1:N)
@@ -322,7 +359,7 @@ function _evolve_static_typed(u0, dt, Nsteps, f!, sigma, rng::R;
             end
         elseif timestepper === :rk2
             @inbounds for step in 1:Nsteps
-                rk2_step_static!(u, T(dt), f!, t, k1, k2, tmp)
+                rk2_step_static!(u, T(dt), f!, t, params, k1, k2, tmp)
                 noise!(u, s, t, rng, ξ, z)
                 t += dt
                 if @inbounds any(u[i] < lo || u[i] > hi for i in 1:N)
@@ -341,7 +378,7 @@ function _evolve_static_typed(u0, dt, Nsteps, f!, sigma, rng::R;
             end
         else
             @inbounds for step in 1:Nsteps
-                euler_step_static!(u, T(dt), f!, t, k1)
+                euler_step_static!(u, T(dt), f!, t, params, k1)
                 noise!(u, s, t, rng, ξ, z)
                 t += dt
                 if @inbounds any(u[i] < lo || u[i] > hi for i in 1:N)
@@ -367,9 +404,10 @@ function _evolve_static_typed(u0, dt, Nsteps, f!, sigma, rng::R;
 end
 
 """
-    evolve_ens_static(u0, dt, Nsteps, f!, sigma; resolution=1, timestepper=:rk4, boundary=nothing, seed=123, n_ens=1)
+    evolve_ens_static(u0, dt, Nsteps, f!, sigma; ...)
 """
 function evolve_ens_static(u0, dt, Nsteps, f!, sigma;
+                           params::Any = nothing,                         # <-- NEW
                            seed::Integer=123, resolution::Integer=1,
                            timestepper::Symbol=:rk4, boundary::Union{Nothing,Tuple}=nothing,
                            n_ens::Integer=1, rng::Union{Nothing,AbstractRNG}=nothing,
@@ -379,9 +417,12 @@ function evolve_ens_static(u0, dt, Nsteps, f!, sigma;
     Nsave = fld(Nsteps, resolution)
     results = Array{T}(undef, N, Nsave + 1, n_ens)
 
-    Threads.@threads :dynamic for ens_idx in 1:n_ens
-        local_rng = rng === nothing ? Random.MersenneTwister(seed + ens_idx * 1000) :
-                                      Random.MersenneTwister(rand(Random.default_rng(), UInt))
+    Threads.@threads :static for ens_idx in 1:n_ens   # <-- static scheduling
+        # Faster per-thread RNG
+        seed_val  = (rng === nothing) ? (seed + ens_idx * 1000) : rand(rng, UInt)
+        local_rng = Random.TaskLocalRNG()
+        Random.seed!(local_rng, seed_val)
+
         u   = MVector{N,T}(u0)
         @inbounds @simd for i in 1:N
             results[i, 1, ens_idx] = u0[i]
@@ -390,12 +431,14 @@ function evolve_ens_static(u0, dt, Nsteps, f!, sigma;
         k1 = MVector{N,T}(undef); k2 = MVector{N,T}(undef)
         k3 = MVector{N,T}(undef); k4 = MVector{N,T}(undef)
         tmp = MVector{N,T}(undef); ξ = MVector{N,T}(undef); z = MVector{N,T}(undef)
-        noise! = _make_noise_applier_static(sigma, u, t; sigma_inplace)
+        noise! = (params === nothing ?
+                    _make_noise_applier_static(sigma, u, t; sigma_inplace=sigma_inplace) :
+                    _make_noise_applier_static_with_params(sigma, u, t, params; sigma_inplace=sigma_inplace))
 
         if boundary === nothing
             if timestepper === :rk4
                 @inbounds for step in 1:Nsteps
-                    rk4_step_static!(u, T(dt), f!, t, k1, k2, k3, k4, tmp)
+                    rk4_step_static!(u, T(dt), f!, t, params, k1, k2, k3, k4, tmp)
                     noise!(u, s, t, local_rng, ξ, z)
                     t += dt
                     if step == next_save
@@ -408,7 +451,7 @@ function evolve_ens_static(u0, dt, Nsteps, f!, sigma;
                 end
             else
                 @inbounds for step in 1:Nsteps
-                    euler_step_static!(u, T(dt), f!, t, k1)
+                    euler_step_static!(u, T(dt), f!, t, params, k1)
                     noise!(u, s, t, local_rng, ξ, z)
                     t += dt
                     if step == next_save
@@ -425,7 +468,7 @@ function evolve_ens_static(u0, dt, Nsteps, f!, sigma;
             count = 0
             if timestepper === :rk4
                 @inbounds for step in 1:Nsteps
-                    rk4_step_static!(u, T(dt), f!, t, k1, k2, k3, k4, tmp)
+                    rk4_step_static!(u, T(dt), f!, t, params, k1, k2, k3, k4, tmp)
                     noise!(u, s, t, local_rng, ξ, z)
                     t += dt
                     if @inbounds any(u[i] < lo || u[i] > hi for i in 1:N)
@@ -444,7 +487,7 @@ function evolve_ens_static(u0, dt, Nsteps, f!, sigma;
                 end
             else
                 @inbounds for step in 1:Nsteps
-                    euler_step_static!(u, T(dt), f!, t, k1)
+                    euler_step_static!(u, T(dt), f!, t, params, k1)
                     noise!(u, s, t, local_rng, ξ, z)
                     t += dt
                     if @inbounds any(u[i] < lo || u[i] > hi for i in 1:N)

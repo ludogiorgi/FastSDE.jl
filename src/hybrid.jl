@@ -27,6 +27,7 @@ Integrate a single trajectory using the StaticArrays path when `length(u0) ≤ t
 otherwise the dynamic path. Returns an array of size `(dim, Nsave+1)`.
 """
 function evolve(u0::AbstractVector, dt, Nsteps::Integer, f!, sigma;
+                params::Any = nothing,                       # <-- NEW
                 seed::Integer=123, resolution::Integer=1,
                 timestepper::Symbol=:rk4, boundary::Union{Nothing,Tuple}=nothing,
                 n_ens::Integer=1, rng::Union{Nothing,AbstractRNG}=nothing,
@@ -35,7 +36,9 @@ function evolve(u0::AbstractVector, dt, Nsteps::Integer, f!, sigma;
 
     N = length(u0)
     if n_ens != 1
-        arr = evolve_ens(u0, dt, Nsteps, f!, sigma; seed, resolution, timestepper, boundary, n_ens, rng, verbose, manage_blas_threads, sigma_inplace=sigma_inplace)
+        arr = evolve_ens(u0, dt, Nsteps, f!, sigma;
+                         params=params, seed, resolution, timestepper, boundary,
+                         n_ens, rng, verbose, manage_blas_threads, sigma_inplace=sigma_inplace)
         if flatten
             dim, timesteps, ensembles = size(arr)
             T = eltype(arr)
@@ -50,9 +53,13 @@ function evolve(u0::AbstractVector, dt, Nsteps::Integer, f!, sigma;
     end
 
     if N <= _STATIC_THRESHOLD[]
-        return evolve_static(u0, dt, Nsteps, f!, sigma; seed, resolution, timestepper, boundary, rng=rng, verbose=verbose, sigma_inplace=sigma_inplace)
+        return evolve_static(u0, dt, Nsteps, f!, sigma;
+                             params=params, seed, resolution, timestepper, boundary,
+                             rng=rng, verbose=verbose, sigma_inplace=sigma_inplace)
     else
-        return evolve_dyn(u0, dt, Nsteps, f!, sigma; seed, resolution, timestepper, boundary, rng=rng, verbose=verbose, sigma_inplace=sigma_inplace)
+        return evolve_dyn(u0, dt, Nsteps, f!, sigma;
+                          params=params, seed, resolution, timestepper, boundary,
+                          rng=rng, verbose=verbose, sigma_inplace=sigma_inplace)
     end
 end
 
@@ -63,6 +70,7 @@ Integrate an ensemble using the StaticArrays path when `length(u0) ≤ threshold
 otherwise the dynamic path. Returns an array of size `(dim, Nsave+1, n_ens)`.
 """
 function evolve_ens(u0::AbstractVector, dt, Nsteps::Integer, f!, sigma;
+                    params::Any = nothing,                       # <-- NEW
                     seed::Integer=123, resolution::Integer=1,
                     timestepper::Symbol=:rk4, boundary::Union{Nothing,Tuple}=nothing,
                     n_ens::Integer=1, rng::Union{Nothing,AbstractRNG}=nothing,
@@ -81,9 +89,13 @@ function evolve_ens(u0::AbstractVector, dt, Nsteps::Integer, f!, sigma;
 
     try
         if N <= _STATIC_THRESHOLD[]
-            return evolve_ens_static(u0, dt, Nsteps, f!, sigma; seed, resolution, timestepper, boundary, n_ens, rng=rng, verbose=verbose, sigma_inplace=sigma_inplace)
+            return evolve_ens_static(u0, dt, Nsteps, f!, sigma;
+                                     params=params, seed, resolution, timestepper, boundary,
+                                     n_ens, rng=rng, verbose=verbose, sigma_inplace=sigma_inplace)
         else
-            return evolve_ens_dyn(u0, dt, Nsteps, f!, sigma; seed, resolution, timestepper, boundary, n_ens, rng=rng, verbose=verbose, sigma_inplace=sigma_inplace)
+            return evolve_ens_dyn(u0, dt, Nsteps, f!, sigma;
+                                  params=params, seed, resolution, timestepper, boundary,
+                                  n_ens, rng=rng, verbose=verbose, sigma_inplace=sigma_inplace)
         end
     finally
         if manage_blas_threads && n_ens > 1 && old_blas_threads !== nothing

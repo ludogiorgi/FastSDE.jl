@@ -72,3 +72,63 @@ end
 
 run()
 
+##
+
+# Shared drift and diffusion for BOTH FastSDE and DifferentialEquations
+# Signatures: f!(du,u,p,t), sigma!(out,u,p,t)
+function f!(du, u, p, t)
+    @inbounds begin
+        du[1] = -p.dᵤ * u[1] - p.wᵤ * u[2] + u[3]
+        du[2] = -p.dᵤ * u[2] + p.wᵤ * u[1]
+        du[3] = -p.dₜ * u[3]
+    end
+    return nothing
+end
+
+function sigma!(out, u, p, t)
+    @inbounds begin
+        out[1] = p.σ₁
+        out[2] = p.σ₂
+        out[3] = 1.5 * (tanh(u[1]) + 1)
+    end
+    return nothing
+end
+
+function run()
+    println("\nBenchmark: Triad-like 3D system (FastSDE vs DifferentialEquations.EM)\n")
+    Random.seed!(123)
+
+    dim = 3
+    dt = 0.01
+    Nsteps = 1_000_000
+    u0 = [0.0, 0.0, 0.0]
+    resolution = 10
+
+    # Force StaticArrays path for small N
+    set_static_threshold!(64)
+
+    println("Config: dim=$(dim), dt=$(dt), Nsteps=$(Nsteps), save every $(resolution) steps")
+
+    # --- FastSDE (Euler) ---
+    # Warm-up (compile)
+    _ = evolve(u0, dt, 1, f!, sigma!; params=p, timestepper=:euler, resolution=resolution, n_ens=100)
+    println("\nFastSDE (evolve, Euler):")
+    bench_fast = @benchmark evolve($u0, $dt, $(100*Nsteps), $f!, $sigma!;
+                               params=$p, timestepper=:euler, resolution=$resolution, n_ens=1)
+    println(bench_fast)
+
+    # --- DifferentialEquations (EM) ---
+    # Build SDEProblem using the SAME f!/sigma!
+    tspan = (0.0, (100*Nsteps) * dt)
+    prob = SDEProblem(f!, sigma!, copy(u0), tspan, p)
+    # Warm-up (compile)
+    _ = solve(prob, EM(); dt=dt, saveat=resolution*dt)
+    println("\nDifferentialEquations (EM):")
+    bench_de = @benchmark solve($prob, EM(); dt=$dt, saveat=$(resolution*dt))
+    println(bench_de)
+
+    println("\nDone.\n")
+end
+
+run()
+
