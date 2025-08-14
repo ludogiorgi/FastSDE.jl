@@ -65,6 +65,26 @@ build_sigma_matrix(N::Int, σx::Float64) = (u, t) -> Matrix(I, N, N) .* σx
         @test size(traj2) == (N, Nsave)
     end
 
+    # Check all timesteppers (:euler, :rk2, :rk4) agree with fixed-stage polynomial for du/dt=-u, σ=0
+    @testset "All timesteppers - static and dynamic" begin
+        amp_factor(sym, dt) = sym === :euler ? (1 - dt) : sym === :rk2 ? (1 - dt + 0.5*dt^2) : (1 - dt + 0.5*dt^2 - (dt^3)/6 + (dt^4)/24)
+        for path in ("static", "dynamic")
+            if path == "static"
+                set_static_threshold!(1000)  # force static
+            else
+                set_static_threshold!(1)     # force dynamic
+            end
+            u0 = [1.0, -2.0, 0.5]
+            sigma = 0.0
+            for method in (:euler, :rk2, :rk4)
+                traj = evolve(u0, dt, Nsteps, linear_decay!, sigma; seed=2024, resolution=1, timestepper=method)
+                fac = amp_factor(method, dt)^Nsteps
+                @test size(traj) == (length(u0), Nsteps + 1)
+                @test isapprox(traj[:, end], fac .* u0; rtol=1e-10, atol=1e-10)
+            end
+        end
+    end
+
     @testset "Vector σ support - dynamic path" begin
         set_static_threshold!(1)     # force dynamic for N > 1
         N = 6

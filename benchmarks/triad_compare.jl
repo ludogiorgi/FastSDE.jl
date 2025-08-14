@@ -13,18 +13,17 @@ using StaticArrays
 using FastSDE
 using DifferentialEquations
 
+const p = (dᵤ=0.2, wᵤ=0.4, dₜ=2.0, σ₁=0.3, σ₂=0.3)
+
 function run()
     println("\nBenchmark: Triad-like 3D system (FastSDE vs DifferentialEquations.EM)\n")
 
     Random.seed!(123)
 
-    # Parameters
-    p = (dᵤ=0.2, wᵤ=0.4, dₜ=2.0, σ₁=0.3, σ₂=0.3)
-
     # Problem setup
     dim = 3
     dt = 0.01
-    Nsteps = 100_000
+    Nsteps = 1_000_000
     u0 = [0.0, 0.0, 0.0]
     resolution = 10
 
@@ -48,7 +47,7 @@ function run()
     end
 
     println("\nFastSDE (evolve, Euler):")
-    bench_fast = @benchmark evolve($u0, $dt, $(100*Nsteps), $f!, $sigma!; timestepper=:euler, resolution=$resolution, n_ens=1)
+    bench_fast = @benchmark evolve($u0, $dt, $(1*Nsteps), $f!, $sigma!; timestepper=:euler, resolution=$resolution, n_ens=100)
     println(bench_fast)
 
     # DifferentialEquations setup (EM)

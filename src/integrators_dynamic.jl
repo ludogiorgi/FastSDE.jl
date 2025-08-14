@@ -17,6 +17,7 @@ using LinearAlgebra: mul!, BLAS
 end
 
 @inline _resolve_stepper_dyn(sym) = sym === :rk4 ? rk4_step! :
+                                    sym === :rk2 ? rk2_step! :
                                     sym === :euler ? euler_step! :
                                     error("Invalid timestepper: $sym")
 
@@ -68,6 +69,31 @@ function rk4_step!(u, dt, f!, t, k1, k2, k3, k4, tmp)
     else
         @inbounds @simd for i in eachindex(u, k1, k2, k3, k4)
             u[i] += (dt / 6) * (k1[i] + 2k2[i] + 2k3[i] + k4[i])
+        end
+    end
+    return nothing
+end
+
+"""
+    rk2_step!(u, dt, f!, t, k1, k2, tmp)
+
+Second-order Runge–Kutta (midpoint) deterministic step.
+"""
+function rk2_step!(u, dt, f!, t, k1, k2, tmp)
+    f!(k1, u, t)
+    if length(u) >= 256
+        @inbounds copyto!(tmp, u); BLAS.axpy!(0.5 * dt, k1, tmp)
+    else
+        @inbounds @simd for i in eachindex(u, tmp, k1)
+            tmp[i] = u[i] + 0.5 * dt * k1[i]
+        end
+    end
+    f!(k2, tmp, t + 0.5 * dt)
+    if length(u) >= 256
+        BLAS.axpy!(dt, k2, u)
+    else
+        @inbounds @simd for i in eachindex(u, k2)
+            u[i] += dt * k2[i]
         end
     end
     return nothing
@@ -225,6 +251,19 @@ function _evolve_dyn_typed(u0, dt, Nsteps, f!, sigma, rng::R;
                     next_save += resolution
                 end
             end
+        elseif ts === rk2_step!
+            @inbounds for step in 1:Nsteps
+                rk2_step!(u, dt, f!, t, k1, k2, tmp)
+                noise!(u, s, t, rng, noise_buf, tmp_vec)
+                t += dt
+                if step == next_save
+                    save_index += 1
+                    @inbounds @simd for i in 1:dim
+                        results[i, save_index] = u[i]
+                    end
+                    next_save += resolution
+                end
+            end
         else
             @inbounds for step in 1:Nsteps
                 euler_step!(u, dt, f!, t, k1)
@@ -245,6 +284,25 @@ function _evolve_dyn_typed(u0, dt, Nsteps, f!, sigma, rng::R;
         if ts === rk4_step!
             @inbounds for step in 1:Nsteps
                 rk4_step!(u, dt, f!, t, k1, k2, k3, k4, tmp)
+                noise!(u, s, t, rng, noise_buf, tmp_vec)
+                t += dt
+                if crossed(u, lo, hi)
+                    @inbounds @simd for i in 1:dim
+                        u[i] = u0[i]
+                    end
+                    count += 1
+                end
+                if step == next_save
+                    save_index += 1
+                    @inbounds @simd for i in 1:dim
+                        results[i, save_index] = u[i]
+                    end
+                    next_save += resolution
+                end
+            end
+        elseif ts === rk2_step!
+            @inbounds for step in 1:Nsteps
+                rk2_step!(u, dt, f!, t, k1, k2, tmp)
                 noise!(u, s, t, rng, noise_buf, tmp_vec)
                 t += dt
                 if crossed(u, lo, hi)
@@ -329,6 +387,19 @@ function evolve_ens_dyn(u0, dt, Nsteps, f!, sigma;
                         next_save += resolution
                     end
                 end
+            elseif ts === rk2_step!
+                @inbounds for step in 1:Nsteps
+                    rk2_step!(u, dt, f!, t, k1, k2, tmp)
+                    noise!(u, s, t, local_rng, noise_buf, tmp_vec)
+                    t += dt
+                    if step == next_save
+                        save_index += 1
+                        @inbounds @simd for i in 1:dim
+                            results[i, save_index, ens_idx] = u[i]
+                        end
+                        next_save += resolution
+                    end
+                end
             else
                 @inbounds for step in 1:Nsteps
                     euler_step!(u, dt, f!, t, k1)
@@ -349,6 +420,25 @@ function evolve_ens_dyn(u0, dt, Nsteps, f!, sigma;
             if ts === rk4_step!
                 @inbounds for step in 1:Nsteps
                     rk4_step!(u, dt, f!, t, k1, k2, k3, k4, tmp)
+                    noise!(u, s, t, local_rng, noise_buf, tmp_vec)
+                    t += dt
+                    if crossed(u, lo, hi)
+                        @inbounds @simd for i in 1:dim
+                            u[i] = u0[i]
+                        end
+                        count += 1
+                    end
+                    if step == next_save
+                        save_index += 1
+                        @inbounds @simd for i in 1:dim
+                            results[i, save_index, ens_idx] = u[i]
+                        end
+                        next_save += resolution
+                    end
+                end
+            elseif ts === rk2_step!
+                @inbounds for step in 1:Nsteps
+                    rk2_step!(u, dt, f!, t, k1, k2, tmp)
                     noise!(u, s, t, local_rng, noise_buf, tmp_vec)
                     t += dt
                     if crossed(u, lo, hi)

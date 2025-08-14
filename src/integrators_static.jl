@@ -36,6 +36,26 @@ using LinearAlgebra: mul!
 end
 
 """
+    rk2_step_static!(u, dt, f!, t, k1, k2, tmp)
+
+Second-order Runge–Kutta (midpoint) deterministic step.
+"""
+@inline function rk2_step_static!(
+    u::MVector{N,T}, dt::T, f!, t::T,
+    k1::MVector{N,T}, k2::MVector{N,T}, tmp::MVector{N,T},
+) where {N,T}
+    f!(k1, u, t)
+    @inbounds @simd for i in 1:N
+        tmp[i] = u[i] + 0.5 * dt * k1[i]
+    end
+    f!(k2, tmp, t + 0.5 * dt)
+    @inbounds @simd for i in 1:N
+        u[i] += dt * k2[i]
+    end
+    return nothing
+end
+
+"""
     euler_step_static!(u, dt, f!, t, k1)
 """
 @inline function euler_step_static!(
@@ -251,6 +271,19 @@ function _evolve_static_typed(u0, dt, Nsteps, f!, sigma, rng::R;
                     next_save += resolution
                 end
             end
+        elseif timestepper === :rk2
+            @inbounds for step in 1:Nsteps
+                rk2_step_static!(u, T(dt), f!, t, k1, k2, tmp)
+                noise!(u, s, t, rng, ξ, z)
+                t += dt
+                if step == next_save
+                    save_idx += 1
+                    @inbounds @simd for i in 1:N
+                        results[i, save_idx] = u[i]
+                    end
+                    next_save += resolution
+                end
+            end
         else
             @inbounds for step in 1:Nsteps
                 euler_step_static!(u, T(dt), f!, t, k1)
@@ -271,6 +304,25 @@ function _evolve_static_typed(u0, dt, Nsteps, f!, sigma, rng::R;
         if timestepper === :rk4
             @inbounds for step in 1:Nsteps
                 rk4_step_static!(u, T(dt), f!, t, k1, k2, k3, k4, tmp)
+                noise!(u, s, t, rng, ξ, z)
+                t += dt
+                if @inbounds any(u[i] < lo || u[i] > hi for i in 1:N)
+                    @inbounds @simd for i in 1:N
+                        u[i] = u0[i]
+                    end
+                    count += 1
+                end
+                if step == next_save
+                    save_idx += 1
+                    @inbounds @simd for i in 1:N
+                        results[i, save_idx] = u[i]
+                    end
+                    next_save += resolution
+                end
+            end
+        elseif timestepper === :rk2
+            @inbounds for step in 1:Nsteps
+                rk2_step_static!(u, T(dt), f!, t, k1, k2, tmp)
                 noise!(u, s, t, rng, ξ, z)
                 t += dt
                 if @inbounds any(u[i] < lo || u[i] > hi for i in 1:N)
