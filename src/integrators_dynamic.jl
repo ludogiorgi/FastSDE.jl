@@ -153,7 +153,7 @@ end
 """
 No-params builder (existing behavior).
 """
-function _make_noise_applier_dyn(sigma_any, u0, t0; sigma_inplace::Bool=false)
+function _make_noise_applier_dyn(sigma_any, u0, t0; sigma_inplace::Bool=true)
     if sigma_inplace && sigma_any isa Function
         T = typeof(t0); dim = length(u0)
         σ_vec = Vector{T}(undef, dim)
@@ -205,7 +205,7 @@ end
 With-params builder (preferred when params ≠ nothing).
 Supports sigma!(out,u,p,t) and sigma(u,p,t).
 """
-function _make_noise_applier_dyn_with_params(sigma_any, u0, t0, params; sigma_inplace::Bool=false)
+function _make_noise_applier_dyn_with_params(sigma_any, u0, t0, params; sigma_inplace::Bool=true)
     if sigma_any isa Function
         T = typeof(t0); dim = length(u0)
 
@@ -272,7 +272,7 @@ function evolve_dyn(u0, dt, Nsteps, f!, sigma;
                     seed::Integer=123, resolution::Integer=1,
                     timestepper::Symbol=:rk4, boundary::Union{Nothing,Tuple}=nothing,
                     rng::Union{Nothing,AbstractRNG}=nothing, verbose::Bool=false,
-                    sigma_inplace::Bool=false)
+                    sigma_inplace::Bool=true)
     local_rng = rng === nothing ? Random.MersenneTwister(seed) : rng
     return _evolve_dyn_typed(u0, dt, Nsteps, f!, sigma, local_rng;
                              params=params, resolution, timestepper, boundary, verbose, sigma_inplace)
@@ -282,7 +282,7 @@ function _evolve_dyn_typed(u0, dt, Nsteps, f!, sigma, rng::R;
                            params::Any = nothing,                          # <-- NEW
                            resolution::Integer=1, timestepper::Symbol=:rk4,
                            boundary::Union{Nothing,Tuple}=nothing, verbose::Bool=false,
-                           sigma_inplace::Bool=false) where {R<:AbstractRNG}
+                           sigma_inplace::Bool=true) where {R<:AbstractRNG}
 
     dim   = length(u0)
     T     = promote_type(eltype(u0), typeof(dt))
@@ -419,7 +419,7 @@ function evolve_ens_dyn(u0, dt, Nsteps, f!, sigma;
                         seed::Integer=123, resolution::Integer=1,
                         timestepper::Symbol=:rk4, boundary::Union{Nothing,Tuple}=nothing,
                         n_ens::Integer=1, rng::Union{Nothing,AbstractRNG}=nothing,
-                        verbose::Bool=false, sigma_inplace::Bool=false)
+                        verbose::Bool=false, sigma_inplace::Bool=true)
 
     dim   = length(u0)
     T     = promote_type(eltype(u0), typeof(dt))

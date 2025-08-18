@@ -32,7 +32,7 @@ function evolve(u0::AbstractVector, dt, Nsteps::Integer, f!, sigma;
                 timestepper::Symbol=:rk4, boundary::Union{Nothing,Tuple}=nothing,
                 n_ens::Integer=1, rng::Union{Nothing,AbstractRNG}=nothing,
                 verbose::Bool=false, flatten::Bool=true, manage_blas_threads::Bool=true,
-                sigma_inplace::Bool=false)
+                sigma_inplace::Bool=true)
 
     N = length(u0)
     if n_ens != 1
@@ -75,7 +75,7 @@ function evolve_ens(u0::AbstractVector, dt, Nsteps::Integer, f!, sigma;
                     timestepper::Symbol=:rk4, boundary::Union{Nothing,Tuple}=nothing,
                     n_ens::Integer=1, rng::Union{Nothing,AbstractRNG}=nothing,
                     verbose::Bool=false, manage_blas_threads::Bool=true,
-                    sigma_inplace::Bool=false)
+                    sigma_inplace::Bool=true)
 
     N = length(u0)
 

@@ -149,7 +149,7 @@ end
 # --- Noise applier builders ---
 
 function _make_noise_applier_static(sigma_any, u0::MVector{N,T}, t0::T;
-                                    sigma_inplace::Bool=false) where {N,T}
+                                    sigma_inplace::Bool=true) where {N,T}
     if sigma_any isa Function
         σ_probe = MVector{N,T}(undef)
         try
@@ -209,7 +209,7 @@ With-params builder (preferred when params ≠ nothing).
 Supports sigma!(out,u,p,t) and sigma(u,p,t).
 """
 function _make_noise_applier_static_with_params(sigma_any, u0::MVector{N,T}, t0::T, params;
-                                                sigma_inplace::Bool=false) where {N,T}
+                                                sigma_inplace::Bool=true) where {N,T}
     if sigma_any isa Function
         σ_probe = MVector{N,T}(undef)
         try
@@ -259,7 +259,7 @@ function evolve_static(u0, dt, Nsteps, f!, sigma;
                        seed::Integer=123, resolution::Integer=1,
                        timestepper::Symbol=:rk4, boundary::Union{Nothing,Tuple}=nothing,
                        rng::Union{Nothing,AbstractRNG}=nothing, verbose::Bool=false,
-                       sigma_inplace::Bool=false)
+                       sigma_inplace::Bool=true)
     local_rng = rng === nothing ? Random.MersenneTwister(seed) : rng
     return _evolve_static_typed(u0, dt, Nsteps, f!, sigma, local_rng;
                                 params=params, resolution, timestepper, boundary, verbose, sigma_inplace)
@@ -269,7 +269,7 @@ function _evolve_static_typed(u0, dt, Nsteps, f!, sigma, rng::R;
                               params::Any = nothing,                         # <-- NEW
                               resolution::Integer=1, timestepper::Symbol=:rk4,
                               boundary::Union{Nothing,Tuple}=nothing, verbose::Bool=false,
-                              sigma_inplace::Bool=false) where {R<:AbstractRNG}
+                              sigma_inplace::Bool=true) where {R<:AbstractRNG}
     N = length(u0)
     T = promote_type(eltype(u0), typeof(dt))
 
@@ -411,7 +411,7 @@ function evolve_ens_static(u0, dt, Nsteps, f!, sigma;
                            seed::Integer=123, resolution::Integer=1,
                            timestepper::Symbol=:rk4, boundary::Union{Nothing,Tuple}=nothing,
                            n_ens::Integer=1, rng::Union{Nothing,AbstractRNG}=nothing,
-                           verbose::Bool=false, sigma_inplace::Bool=false)
+                           verbose::Bool=false, sigma_inplace::Bool=true)
     N = length(u0)
     T = promote_type(eltype(u0), typeof(dt))
     Nsave = fld(Nsteps, resolution)
