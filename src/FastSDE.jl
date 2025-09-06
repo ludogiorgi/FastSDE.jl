@@ -19,6 +19,9 @@ using Base.Threads
 using Random
 using StaticArrays
 
+# Shared helper: avoid duplicate definitions across includes
+@inline _call_f!(f!, du, u, t, p) = (p === nothing ? f!(du, u, t) : f!(du, u, p, t))
+
 # Implementation files
 include("integrators_dynamic.jl")
 include("integrators_static.jl")

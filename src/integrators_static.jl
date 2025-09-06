@@ -7,7 +7,6 @@ using Random
 using LinearAlgebra: mul!
 
 # --- Call shims (params or no params) ---
-@inline _call_f!(f!, du, u, t, p) = (p === nothing ? f!(du, u, t) : f!(du, u, p, t))
 
 # --- Time steppers (in-place, static) ---
 
