@@ -9,7 +9,7 @@ using LinearAlgebra: mul!, BLAS
 
 # --- Utilities ---
 
-@inline function crossed(u, lo, hi)
+@inline function _crossed(u, lo, hi)
     @inbounds for x in u
         if x < lo || x > hi
             return true
@@ -18,9 +18,9 @@ using LinearAlgebra: mul!, BLAS
     return false
 end
 
-@inline _resolve_stepper_dyn(sym) = sym === :rk4 ? rk4_step! :
-                                    sym === :rk2 ? rk2_step! :
-                                    sym === :euler ? euler_step! :
+@inline _resolve_stepper_dyn(sym) = sym === :rk4 ? _rk4_step! :
+                                    sym === :rk2 ? _rk2_step! :
+                                    sym === :euler ? _euler_step! :
                                     error("Invalid timestepper: $sym")
 
 # Lift constants to callable sigma(u,t) once
@@ -32,9 +32,9 @@ end
 # --- Time steppers (in-place, dynamic) ---
 
 """
-    rk4_step!(u, dt, f!, t, params, k1, k2, k3, k4, tmp)
+Fourth-order Runge–Kutta deterministic step (internal, dynamic arrays).
 """
-function rk4_step!(u, dt, f!, t, params, k1, k2, k3, k4, tmp)
+function _rk4_step!(u, dt, f!, t, params, k1, k2, k3, k4, tmp)
     _call_f!(f!, k1, u, t, params)
     if length(u) >= 256
         @inbounds copyto!(tmp, u); BLAS.axpy!(0.5 * dt, k1, tmp)
@@ -77,11 +77,9 @@ function rk4_step!(u, dt, f!, t, params, k1, k2, k3, k4, tmp)
 end
 
 """
-    rk2_step!(u, dt, f!, t, params, k1, k2, tmp)
-
-Second-order Runge–Kutta (midpoint) deterministic step.
+Second-order Runge–Kutta (midpoint) deterministic step (internal, dynamic arrays).
 """
-function rk2_step!(u, dt, f!, t, params, k1, k2, tmp)
+function _rk2_step!(u, dt, f!, t, params, k1, k2, tmp)
     _call_f!(f!, k1, u, t, params)
     if length(u) >= 256
         @inbounds copyto!(tmp, u); BLAS.axpy!(0.5 * dt, k1, tmp)
@@ -102,9 +100,9 @@ function rk2_step!(u, dt, f!, t, params, k1, k2, tmp)
 end
 
 """
-    euler_step!(u, dt, f!, t, params, k1)
+Euler deterministic step (internal, dynamic arrays).
 """
-function euler_step!(u, dt, f!, t, params, k1)
+function _euler_step!(u, dt, f!, t, params, k1)
     _call_f!(f!, k1, u, t, params)
     if length(u) >= 256
         BLAS.axpy!(dt, k1, u)
@@ -118,8 +116,8 @@ end
 
 # --- Noise adders (dynamic) ---
 
-@inline function add_noise!(u::AbstractVector{<:Real}, s, σ::Real,
-                            rng::AbstractRNG, noise_buf::AbstractVector{<:AbstractFloat})
+@inline function _add_noise!(u::AbstractVector{<:Real}, s, σ::Real,
+                             rng::AbstractRNG, noise_buf::AbstractVector{<:AbstractFloat})
     randn!(rng, noise_buf)
     @inbounds @simd for i in eachindex(u, noise_buf)
         u[i] += s * σ * noise_buf[i]
@@ -127,8 +125,8 @@ end
     return nothing
 end
 
-@inline function add_noise!(u::AbstractVector{<:Real}, s, σ::AbstractVector,
-                            rng::AbstractRNG, noise_buf::AbstractVector{<:AbstractFloat})
+@inline function _add_noise!(u::AbstractVector{<:Real}, s, σ::AbstractVector,
+                             rng::AbstractRNG, noise_buf::AbstractVector{<:AbstractFloat})
     randn!(rng, noise_buf)
     @inbounds @simd for i in eachindex(u, σ, noise_buf)
         u[i] += s * (σ[i] * noise_buf[i])
@@ -136,11 +134,11 @@ end
     return nothing
 end
 
-@inline function add_noise!(u::AbstractVector{<:Real}, s, σ::AbstractMatrix,
-                            rng::AbstractRNG, noise_buf::AbstractVector{<:AbstractFloat},
-                            tmp_vec::AbstractVector{<:Real})
+@inline function _add_noise!(u::AbstractVector{<:Real}, s, σ::AbstractMatrix,
+                             rng::AbstractRNG, noise_buf::AbstractVector{<:AbstractFloat},
+                             tmp_vec::AbstractVector{<:Real})
     randn!(rng, noise_buf)
-    mul!(tmp_vec, σ, noise_buf)   # correlated noise (no temporary)
+    mul!(tmp_vec, σ, noise_buf)   # correlated noise
     @inbounds @simd for i in eachindex(u, tmp_vec)
         u[i] += s * tmp_vec[i]
     end
@@ -160,7 +158,7 @@ function _make_noise_applier_dyn(sigma_any, u0, t0; sigma_inplace::Bool=true)
             sigma_any(σ_vec, u0, t0)  # sigma!(σ_vec,u,t)
             return (u, s, t, rng, noise_buf, tmp_vec) -> begin
                 sigma_any(σ_vec, u, t)
-                add_noise!(u, s, σ_vec, rng, noise_buf)
+                _add_noise!(u, s, σ_vec, rng, noise_buf)
             end
         catch err
             if !(err isa MethodError); rethrow(); end
@@ -170,7 +168,7 @@ function _make_noise_applier_dyn(sigma_any, u0, t0; sigma_inplace::Bool=true)
             sigma_any(Σ_mat, u0, t0)  # sigma!(Σ_mat,u,t)
             return (u, s, t, rng, noise_buf, tmp_vec) -> begin
                 sigma_any(Σ_mat, u, t)
-                add_noise!(u, s, Σ_mat, rng, noise_buf, tmp_vec)
+                _add_noise!(u, s, Σ_mat, rng, noise_buf, tmp_vec)
             end
         catch err
             if !(err isa MethodError); rethrow(); end
@@ -183,17 +181,17 @@ function _make_noise_applier_dyn(sigma_any, u0, t0; sigma_inplace::Bool=true)
         return (u, s, t, rng, noise_buf, tmp_vec) -> begin
             σ = sigma(u, t)::Real
             iszero(σ) && return
-            add_noise!(u, s, σ, rng, noise_buf)
+            _add_noise!(u, s, σ, rng, noise_buf)
         end
     elseif sig0 isa AbstractVector
         return (u, s, t, rng, noise_buf, tmp_vec) -> begin
             σ = sigma(u, t)::AbstractVector
-            add_noise!(u, s, σ, rng, noise_buf)
+            _add_noise!(u, s, σ, rng, noise_buf)
         end
     elseif sig0 isa AbstractMatrix
         return (u, s, t, rng, noise_buf, tmp_vec) -> begin
             σ = sigma(u, t)::AbstractMatrix
-            add_noise!(u, s, σ, rng, noise_buf, tmp_vec)
+            _add_noise!(u, s, σ, rng, noise_buf, tmp_vec)
         end
     else
         error("Unsupported σ type: $(typeof(sig0))")
@@ -214,7 +212,7 @@ function _make_noise_applier_dyn_with_params(sigma_any, u0, t0, params; sigma_in
             sigma_any(σ_vec, u0, params, t0)  # sigma!(σ_vec,u,p,t)
             return (u, s, t, rng, noise_buf, tmp_vec) -> begin
                 sigma_any(σ_vec, u, params, t)
-                add_noise!(u, s, σ_vec, rng, noise_buf)
+                _add_noise!(u, s, σ_vec, rng, noise_buf)
             end
         catch err
             if !(err isa MethodError); rethrow(); end
@@ -226,7 +224,7 @@ function _make_noise_applier_dyn_with_params(sigma_any, u0, t0, params; sigma_in
             sigma_any(Σ_mat, u0, params, t0)  # sigma!(Σ,u,p,t)
             return (u, s, t, rng, noise_buf, tmp_vec) -> begin
                 sigma_any(Σ_mat, u, params, t)
-                add_noise!(u, s, Σ_mat, rng, noise_buf, tmp_vec)
+                _add_noise!(u, s, Σ_mat, rng, noise_buf, tmp_vec)
             end
         catch err
             if !(err isa MethodError); rethrow(); end
@@ -239,17 +237,17 @@ function _make_noise_applier_dyn_with_params(sigma_any, u0, t0, params; sigma_in
                 return (u, s, t, rng, noise_buf, tmp_vec) -> begin
                     σ = sigma_any(u, params, t)::Real
                     iszero(σ) && return
-                    add_noise!(u, s, σ, rng, noise_buf)
+                    _add_noise!(u, s, σ, rng, noise_buf)
                 end
             elseif sig0 isa AbstractVector
                 return (u, s, t, rng, noise_buf, tmp_vec) -> begin
                     σ = sigma_any(u, params, t)::AbstractVector
-                    add_noise!(u, s, σ, rng, noise_buf)
+                    _add_noise!(u, s, σ, rng, noise_buf)
                 end
             elseif sig0 isa AbstractMatrix
                 return (u, s, t, rng, noise_buf, tmp_vec) -> begin
                     σ = sigma_any(u, params, t)::AbstractMatrix
-                    add_noise!(u, s, σ, rng, noise_buf, tmp_vec)
+                    _add_noise!(u, s, σ, rng, noise_buf, tmp_vec)
                 end
             end
         catch err
@@ -261,12 +259,12 @@ function _make_noise_applier_dyn_with_params(sigma_any, u0, t0, params; sigma_in
     return _make_noise_applier_dyn(sigma_any, u0, t0; sigma_inplace=sigma_inplace)
 end
 
-# --- Public API: dynamic path (internal) ---
+# --- Internal API: dynamic path ---
 
 """
-    evolve_dyn(u0, dt, Nsteps, f!, sigma; ...)
+Single-trajectory integrator using dynamic arrays (internal).
 """
-function evolve_dyn(u0, dt, Nsteps, f!, sigma;
+function _evolve_dyn(u0, dt, Nsteps, f!, sigma;
                     params::Any = nothing,                          # <-- NEW
                     seed::Integer=123, resolution::Integer=1,
                     timestepper::Symbol=:rk4, boundary::Union{Nothing,Tuple}=nothing,
@@ -302,9 +300,9 @@ function _evolve_dyn_typed(u0, dt, Nsteps, f!, sigma, rng::R;
                 _make_noise_applier_dyn_with_params(sigma, u, t, params; sigma_inplace=sigma_inplace))
 
     if boundary === nothing
-        if ts === rk4_step!
+        if ts === _rk4_step!
             @inbounds for step in 1:Nsteps
-                rk4_step!(u, dt, f!, t, params, k1, k2, k3, k4, tmp)
+                _rk4_step!(u, dt, f!, t, params, k1, k2, k3, k4, tmp)
                 noise!(u, s, t, rng, noise_buf, tmp_vec)
                 t += dt
                 if step == next_save
@@ -315,9 +313,9 @@ function _evolve_dyn_typed(u0, dt, Nsteps, f!, sigma, rng::R;
                     next_save += resolution
                 end
             end
-        elseif ts === rk2_step!
+        elseif ts === _rk2_step!
             @inbounds for step in 1:Nsteps
-                rk2_step!(u, dt, f!, t, params, k1, k2, tmp)
+                _rk2_step!(u, dt, f!, t, params, k1, k2, tmp)
                 noise!(u, s, t, rng, noise_buf, tmp_vec)
                 t += dt
                 if step == next_save
@@ -330,7 +328,7 @@ function _evolve_dyn_typed(u0, dt, Nsteps, f!, sigma, rng::R;
             end
         else
             @inbounds for step in 1:Nsteps
-                euler_step!(u, dt, f!, t, params, k1)
+                _euler_step!(u, dt, f!, t, params, k1)
                 noise!(u, s, t, rng, noise_buf, tmp_vec)
                 t += dt
                 if step == next_save
@@ -345,12 +343,12 @@ function _evolve_dyn_typed(u0, dt, Nsteps, f!, sigma, rng::R;
     else
         lo, hi = boundary
         count = 0
-        if ts === rk4_step!
+        if ts === _rk4_step!
             @inbounds for step in 1:Nsteps
-                rk4_step!(u, dt, f!, t, params, k1, k2, k3, k4, tmp)
+                _rk4_step!(u, dt, f!, t, params, k1, k2, k3, k4, tmp)
                 noise!(u, s, t, rng, noise_buf, tmp_vec)
                 t += dt
-                if crossed(u, lo, hi)
+                if _crossed(u, lo, hi)
                     @inbounds @simd for i in 1:dim
                         u[i] = u0[i]
                     end
@@ -364,12 +362,12 @@ function _evolve_dyn_typed(u0, dt, Nsteps, f!, sigma, rng::R;
                     next_save += resolution
                 end
             end
-        elseif ts === rk2_step!
+        elseif ts === _rk2_step!
             @inbounds for step in 1:Nsteps
-                rk2_step!(u, dt, f!, t, params, k1, k2, tmp)
+                _rk2_step!(u, dt, f!, t, params, k1, k2, tmp)
                 noise!(u, s, t, rng, noise_buf, tmp_vec)
                 t += dt
-                if crossed(u, lo, hi)
+                if _crossed(u, lo, hi)
                     @inbounds @simd for i in 1:dim
                         u[i] = u0[i]
                     end
@@ -385,10 +383,10 @@ function _evolve_dyn_typed(u0, dt, Nsteps, f!, sigma, rng::R;
             end
         else
             @inbounds for step in 1:Nsteps
-                euler_step!(u, dt, f!, t, params, k1)
+                _euler_step!(u, dt, f!, t, params, k1)
                 noise!(u, s, t, rng, noise_buf, tmp_vec)
                 t += dt
-                if crossed(u, lo, hi)
+                if _crossed(u, lo, hi)
                     @inbounds @simd for i in 1:dim
                         u[i] = u0[i]
                     end
@@ -411,9 +409,9 @@ function _evolve_dyn_typed(u0, dt, Nsteps, f!, sigma, rng::R;
 end
 
 """
-    evolve_ens_dyn(u0, dt, Nsteps, f!, sigma; ...)
+Ensemble integrator using dynamic arrays (internal).
 """
-function evolve_ens_dyn(u0, dt, Nsteps, f!, sigma;
+function _evolve_ens_dyn(u0, dt, Nsteps, f!, sigma;
                         params::Any = nothing,                          # <-- NEW
                         seed::Integer=123, resolution::Integer=1,
                         timestepper::Symbol=:rk4, boundary::Union{Nothing,Tuple}=nothing,
@@ -444,9 +442,9 @@ function evolve_ens_dyn(u0, dt, Nsteps, f!, sigma;
                     _make_noise_applier_dyn_with_params(sigma, u, t, params; sigma_inplace=sigma_inplace))
 
         if boundary === nothing
-            if ts === rk4_step!
+            if ts === _rk4_step!
                 @inbounds for step in 1:Nsteps
-                    rk4_step!(u, dt, f!, t, params, k1, k2, k3, k4, tmp)
+                    _rk4_step!(u, dt, f!, t, params, k1, k2, k3, k4, tmp)
                     noise!(u, s, t, local_rng, noise_buf, tmp_vec)
                     t += dt
                     if step == next_save
@@ -457,9 +455,9 @@ function evolve_ens_dyn(u0, dt, Nsteps, f!, sigma;
                         next_save += resolution
                     end
                 end
-            elseif ts === rk2_step!
+            elseif ts === _rk2_step!
                 @inbounds for step in 1:Nsteps
-                    rk2_step!(u, dt, f!, t, params, k1, k2, tmp)
+                    _rk2_step!(u, dt, f!, t, params, k1, k2, tmp)
                     noise!(u, s, t, local_rng, noise_buf, tmp_vec)
                     t += dt
                     if step == next_save
@@ -472,7 +470,7 @@ function evolve_ens_dyn(u0, dt, Nsteps, f!, sigma;
                 end
             else
                 @inbounds for step in 1:Nsteps
-                    euler_step!(u, dt, f!, t, params, k1)
+                    _euler_step!(u, dt, f!, t, params, k1)
                     noise!(u, s, t, local_rng, noise_buf, tmp_vec)
                     t += dt
                     if step == next_save
@@ -487,12 +485,12 @@ function evolve_ens_dyn(u0, dt, Nsteps, f!, sigma;
         else
             lo, hi = boundary
             count = 0
-            if ts === rk4_step!
+            if ts === _rk4_step!
                 @inbounds for step in 1:Nsteps
-                    rk4_step!(u, dt, f!, t, params, k1, k2, k3, k4, tmp)
+                    _rk4_step!(u, dt, f!, t, params, k1, k2, k3, k4, tmp)
                     noise!(u, s, t, local_rng, noise_buf, tmp_vec)
                     t += dt
-                    if crossed(u, lo, hi)
+                    if _crossed(u, lo, hi)
                         @inbounds @simd for i in 1:dim
                             u[i] = u0[i]
                         end
@@ -506,12 +504,12 @@ function evolve_ens_dyn(u0, dt, Nsteps, f!, sigma;
                         next_save += resolution
                     end
                 end
-            elseif ts === rk2_step!
+            elseif ts === _rk2_step!
                 @inbounds for step in 1:Nsteps
-                    rk2_step!(u, dt, f!, t, params, k1, k2, tmp)
+                    _rk2_step!(u, dt, f!, t, params, k1, k2, tmp)
                     noise!(u, s, t, local_rng, noise_buf, tmp_vec)
                     t += dt
-                    if crossed(u, lo, hi)
+                    if _crossed(u, lo, hi)
                         @inbounds @simd for i in 1:dim
                             u[i] = u0[i]
                         end
@@ -527,10 +525,10 @@ function evolve_ens_dyn(u0, dt, Nsteps, f!, sigma;
                 end
             else
                 @inbounds for step in 1:Nsteps
-                    euler_step!(u, dt, f!, t, params, k1)
+                    _euler_step!(u, dt, f!, t, params, k1)
                     noise!(u, s, t, local_rng, noise_buf, tmp_vec)
                     t += dt
-                    if crossed(u, lo, hi)
+                    if _crossed(u, lo, hi)
                         @inbounds @simd for i in 1:dim
                             u[i] = u0[i]
                         end
