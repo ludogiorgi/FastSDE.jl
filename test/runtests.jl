@@ -132,4 +132,5 @@ build_sigma_matrix(N::Int, σx::Float64) = (u, t) -> Matrix(I, N, N) .* σx
     end
 end
 
+include("batched_ensemble.jl")
 

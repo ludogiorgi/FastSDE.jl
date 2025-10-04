@@ -155,6 +155,29 @@ This makes it ideal for:
 - Parameter sweeps and optimization loops
 - Integration with machine learning models (e.g., neural ODEs/SDEs)
 
+### Batched NN drift (fast)
+
+When your drift is a neural network, evaluate it **for all ensemble members at once** by enabling `batched_drift=true` and using a batched drift signature:
+
+```julia
+using FastSDE, Flux
+
+# 4D MLP drift
+nn = Chain(Dense(4,128,tanh), Dense(128,4))
+p  = (nn = nn,)
+
+# DU, U are (4, n_ens)
+f_nn_batched!(DU, U, p, t) = (DU .= p.nn(U))
+
+σ  = 0.1
+u0 = randn(4)
+
+ens = evolve_ens(u0, 1e-3, 100_000, f_nn_batched!, σ;
+                 params=p, n_ens=4096, resolution=200, batched_drift=true)
+```
+
+This issues large BLAS ops (CPU) or GPU kernels instead of `n_ens` small calls, giving a substantial speedup for ML-based drifts. Noise types `Number` (additive), `Vector` (diagonal), `Matrix` (correlated via cached Cholesky), and in‑place `sigma!(Ξ,U,p,t)` with `sigma_inplace=true` are supported exactly as in the columnwise path.
+
 ## License
 
 MIT

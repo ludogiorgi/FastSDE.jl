@@ -25,6 +25,7 @@ using StaticArrays
 # Implementation files
 include("integrators_dynamic.jl")
 include("integrators_static.jl")
+include("ensemble_batched.jl")
 include("hybrid.jl")
 
 # Public API

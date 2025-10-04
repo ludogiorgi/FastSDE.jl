@@ -159,6 +159,7 @@ BLAS threading is automatically disabled during ensemble runs to avoid oversubsc
 - `verbose::Bool=false`: Print diagnostics for first ensemble member.
 - `manage_blas_threads::Bool=true`: Disable BLAS threading during ensemble runs.
 - `sigma_inplace::Bool=true`: Allow in-place diffusion evaluation when possible.
+- `batched_drift::Bool=false`: Enable batched drift evaluation (all ensemble members at once).
 
 # Returns
 - `Array{T,3}`: Ensemble data of size `(dim, Nsave+1, n_ens)`.
@@ -181,7 +182,14 @@ function evolve_ens(u0::AbstractVector, dt, Nsteps::Integer, f!, sigma;
                     timestepper::Symbol=:rk4, boundary::Union{Nothing,Tuple}=nothing,
                     n_ens::Integer=1, rng::Union{Nothing,AbstractRNG}=nothing,
                     verbose::Bool=false, manage_blas_threads::Bool=true,
-                    sigma_inplace::Bool=true)
+                    sigma_inplace::Bool=true, batched_drift::Bool=false)
+
+    if batched_drift
+        return _evolve_ens_batched(u0, dt, Nsteps, f!, sigma;
+            params=params, n_ens=n_ens, resolution=resolution, seed=seed,
+            timestepper=timestepper, boundary=boundary, rng=rng, verbose=verbose,
+            manage_blas_threads=manage_blas_threads, sigma_inplace=sigma_inplace)
+    end
 
     N = length(u0)
 
