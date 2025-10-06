@@ -60,3 +60,6 @@ scripts/PlaSim/PlaSim_data/
 
 # Additional binary/data formats
 *.bson
+
+# AI assistant local metadata (do not commit)
+.claude/
