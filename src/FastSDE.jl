@@ -19,6 +19,11 @@ using Base.Threads
 using Random
 using StaticArrays
 
+# Core definitions
+include("constants.jl")
+include("types.jl")
+include("utils.jl")
+
 # Shared helper: avoid duplicate definitions across includes
 @inline _call_f!(f!, du, u, t, p) = (p === nothing ? f!(du, u, t) : f!(du, u, p, t))
 

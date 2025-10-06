@@ -1,6 +1,11 @@
-# FastSDE
+# FastSDE.jl
 
-Fast, minimalist SDE integrator for Julia using the Euler–Maruyama scheme with higher-order deterministic time-stepping (RK2, RK4). Features in-place drift `f!(du, u, p, t)`, explicit parameter passing, preallocation, StaticArrays fast path for small systems, and support for additive, diagonal, and correlated Gaussian noise.
+[![CI](https://github.com/ludovico/FastSDE.jl/workflows/CI/badge.svg)](https://github.com/ludovico/FastSDE.jl/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+> Fast, minimalist SDE integrator for Julia using the Euler–Maruyama scheme with higher-order deterministic time-stepping (RK2, RK4).
+
+FastSDE.jl provides high-performance stochastic differential equation integration with in-place drift `f!(du, u, p, t)`, explicit parameter passing, automatic dispatch, and support for additive, diagonal, and correlated Gaussian noise.
 
 ## Features
 
@@ -207,6 +212,39 @@ ens = evolve_ens(u0, dt, Nsteps, f_batched!, sigma_batched!;
 
 **Note**: Callable (returning) sigma forms are not yet supported in batched mode unless they return a scalar, vector, or constant matrix.
 
+## Contributing
+
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on:
+- Reporting bugs
+- Suggesting enhancements
+- Submitting pull requests
+- Code style and testing conventions
+
+## Citation
+
+If you use FastSDE.jl in your research, please cite:
+
+```bibtex
+@software{fastsde2025,
+  author = {Giorgini, Ludovico Theo},
+  title = {FastSDE.jl: Fast Stochastic Differential Equation Integration in Julia},
+  year = {2025},
+  url = {https://github.com/ludovico/FastSDE.jl}
+}
+```
+
+## Related Packages
+
+- [DifferentialEquations.jl](https://github.com/SciML/DifferentialEquations.jl) - Comprehensive suite with adaptive methods
+- [StochasticDiffEq.jl](https://github.com/SciML/StochasticDiffEq.jl) - Advanced SDE solvers with high-order schemes
+- [StaticArrays.jl](https://github.com/JuliaArrays/StaticArrays.jl) - Fast fixed-size arrays (used internally)
+
+## Acknowledgments
+
+FastSDE.jl prioritizes performance for long-running simulations and large ensemble studies. For production applications requiring adaptive time-stepping or higher-order stochastic convergence, consider using StochasticDiffEq.jl from the SciML ecosystem.
+
 ## License
 
-MIT
+MIT License - see [LICENSE](LICENSE) for details.
+
+Copyright (c) 2025 Ludovico Theo Giorgini

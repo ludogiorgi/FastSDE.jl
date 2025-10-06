@@ -5,23 +5,7 @@
 using Random
 using LinearAlgebra: mul!, BLAS
 
-# --- Constants ---
-
-# Threshold for switching to BLAS operations in dynamic path
-const _BLAS_SWITCH_THRESHOLD = 256
-
-# --- Call shims (params or no params) ---
-
 # --- Utilities ---
-
-@inline function _crossed(u, lo, hi)
-    @inbounds for x in u
-        if x < lo || x > hi
-            return true
-        end
-    end
-    return false
-end
 
 @inline _resolve_stepper_dyn(sym) = sym === :rk4 ? _rk4_step! :
                                     sym === :rk2 ? _rk2_step! :
@@ -41,7 +25,7 @@ Fourth-order Runge–Kutta deterministic step (internal, dynamic arrays).
 """
 function _rk4_step!(u, dt, f!, t, params, k1, k2, k3, k4, tmp)
     _call_f!(f!, k1, u, t, params)
-    if length(u) >= _BLAS_SWITCH_THRESHOLD
+    if length(u) >= BLAS_SWITCH_THRESHOLD
         @inbounds copyto!(tmp, u); BLAS.axpy!(0.5 * dt, k1, tmp)
     else
         @inbounds @simd for i in eachindex(u, tmp, k1)
@@ -50,7 +34,7 @@ function _rk4_step!(u, dt, f!, t, params, k1, k2, k3, k4, tmp)
     end
     _call_f!(f!, k2, tmp, t + 0.5 * dt, params)
 
-    if length(u) >= _BLAS_SWITCH_THRESHOLD
+    if length(u) >= BLAS_SWITCH_THRESHOLD
         @inbounds copyto!(tmp, u); BLAS.axpy!(0.5 * dt, k2, tmp)
     else
         @inbounds @simd for i in eachindex(u, tmp, k2)
@@ -59,7 +43,7 @@ function _rk4_step!(u, dt, f!, t, params, k1, k2, k3, k4, tmp)
     end
     _call_f!(f!, k3, tmp, t + 0.5 * dt, params)
 
-    if length(u) >= _BLAS_SWITCH_THRESHOLD
+    if length(u) >= BLAS_SWITCH_THRESHOLD
         @inbounds copyto!(tmp, u); BLAS.axpy!(dt, k3, tmp)
     else
         @inbounds @simd for i in eachindex(u, tmp, k3)
@@ -68,7 +52,7 @@ function _rk4_step!(u, dt, f!, t, params, k1, k2, k3, k4, tmp)
     end
     _call_f!(f!, k4, tmp, t + dt, params)
 
-    if length(u) >= _BLAS_SWITCH_THRESHOLD
+    if length(u) >= BLAS_SWITCH_THRESHOLD
         BLAS.axpy!(dt/6, k1, u)
         BLAS.axpy!(dt/3, k2, u)
         BLAS.axpy!(dt/3, k3, u)
@@ -86,7 +70,7 @@ Second-order Runge–Kutta (midpoint) deterministic step (internal, dynamic arra
 """
 function _rk2_step!(u, dt, f!, t, params, k1, k2, tmp)
     _call_f!(f!, k1, u, t, params)
-    if length(u) >= _BLAS_SWITCH_THRESHOLD
+    if length(u) >= BLAS_SWITCH_THRESHOLD
         @inbounds copyto!(tmp, u); BLAS.axpy!(0.5 * dt, k1, tmp)
     else
         @inbounds @simd for i in eachindex(u, tmp, k1)
@@ -94,7 +78,7 @@ function _rk2_step!(u, dt, f!, t, params, k1, k2, tmp)
         end
     end
     _call_f!(f!, k2, tmp, t + 0.5 * dt, params)
-    if length(u) >= _BLAS_SWITCH_THRESHOLD
+    if length(u) >= BLAS_SWITCH_THRESHOLD
         BLAS.axpy!(dt, k2, u)
     else
         @inbounds @simd for i in eachindex(u, k2)
@@ -109,7 +93,7 @@ Euler deterministic step (internal, dynamic arrays).
 """
 function _euler_step!(u, dt, f!, t, params, k1)
     _call_f!(f!, k1, u, t, params)
-    if length(u) >= _BLAS_SWITCH_THRESHOLD
+    if length(u) >= BLAS_SWITCH_THRESHOLD
         BLAS.axpy!(dt, k1, u)
     else
         @inbounds @simd for i in eachindex(u, k1)
@@ -270,9 +254,9 @@ end
 Single-trajectory integrator using dynamic arrays (internal).
 """
 function _evolve_dyn(u0, dt, Nsteps, f!, sigma;
-                    params::Any = nothing,                          # <-- NEW
-                    seed::Integer=123, resolution::Integer=1,
-                    timestepper::Symbol=:rk4, boundary::Union{Nothing,Tuple}=nothing,
+                    params::ParamsType = nothing,
+                    seed::Integer=DEFAULT_SEED, resolution::Integer=DEFAULT_RESOLUTION,
+                    timestepper::Symbol=DEFAULT_TIMESTEPPER, boundary::BoundaryType=nothing,
                     rng::Union{Nothing,AbstractRNG}=nothing, verbose::Bool=false,
                     sigma_inplace::Bool=true)
     local_rng = rng === nothing ? Random.MersenneTwister(seed) : rng
@@ -281,9 +265,9 @@ function _evolve_dyn(u0, dt, Nsteps, f!, sigma;
 end
 
 function _evolve_dyn_typed(u0, dt, Nsteps, f!, sigma, rng::R;
-                           params::Any = nothing,                          # <-- NEW
-                           resolution::Integer=1, timestepper::Symbol=:rk4,
-                           boundary::Union{Nothing,Tuple}=nothing, verbose::Bool=false,
+                           params::ParamsType = nothing,
+                           resolution::Integer=DEFAULT_RESOLUTION, timestepper::Symbol=DEFAULT_TIMESTEPPER,
+                           boundary::BoundaryType=nothing, verbose::Bool=false,
                            sigma_inplace::Bool=true) where {R<:AbstractRNG}
 
     dim   = length(u0)
@@ -417,9 +401,9 @@ end
 Ensemble integrator using dynamic arrays (internal).
 """
 function _evolve_ens_dyn(u0, dt, Nsteps, f!, sigma;
-                        params::Any = nothing,                          # <-- NEW
-                        seed::Integer=123, resolution::Integer=1,
-                        timestepper::Symbol=:rk4, boundary::Union{Nothing,Tuple}=nothing,
+                        params::ParamsType = nothing,
+                        seed::Integer=DEFAULT_SEED, resolution::Integer=DEFAULT_RESOLUTION,
+                        timestepper::Symbol=DEFAULT_TIMESTEPPER, boundary::BoundaryType=nothing,
                         n_ens::Integer=1, rng::Union{Nothing,AbstractRNG}=nothing,
                         verbose::Bool=false, sigma_inplace::Bool=true)
 
@@ -430,7 +414,7 @@ function _evolve_ens_dyn(u0, dt, Nsteps, f!, sigma;
 
     Threads.@threads :static for ens_idx in 1:n_ens   # <-- static scheduling
         # Faster per-thread RNG
-        seed_val  = (rng === nothing) ? (seed + ens_idx * 1000) : rand(rng, UInt)
+        seed_val  = (rng === nothing) ? (seed + ens_idx * ENSEMBLE_SEED_OFFSET) : rand(rng, UInt)
         local_rng = Random.TaskLocalRNG()
         Random.seed!(local_rng, seed_val)
 

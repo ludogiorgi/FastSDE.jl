@@ -63,3 +63,6 @@ scripts/PlaSim/PlaSim_data/
 
 # AI assistant local metadata (do not commit)
 .claude/
+
+# Internal agent guidance document (not for distribution)
+AGENTS.md

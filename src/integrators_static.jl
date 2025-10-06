@@ -252,9 +252,9 @@ end
 Single-trajectory integrator using static arrays (internal).
 """
 function _evolve_static(u0, dt, Nsteps, f!, sigma;
-                       params::Any = nothing,                         # <-- NEW
-                       seed::Integer=123, resolution::Integer=1,
-                       timestepper::Symbol=:rk4, boundary::Union{Nothing,Tuple}=nothing,
+                       params::ParamsType = nothing,
+                       seed::Integer=DEFAULT_SEED, resolution::Integer=DEFAULT_RESOLUTION,
+                       timestepper::Symbol=DEFAULT_TIMESTEPPER, boundary::BoundaryType=nothing,
                        rng::Union{Nothing,AbstractRNG}=nothing, verbose::Bool=false,
                        sigma_inplace::Bool=true)
     local_rng = rng === nothing ? Random.MersenneTwister(seed) : rng
@@ -263,9 +263,9 @@ function _evolve_static(u0, dt, Nsteps, f!, sigma;
 end
 
 function _evolve_static_typed(u0, dt, Nsteps, f!, sigma, rng::R;
-                              params::Any = nothing,                         # <-- NEW
-                              resolution::Integer=1, timestepper::Symbol=:rk4,
-                              boundary::Union{Nothing,Tuple}=nothing, verbose::Bool=false,
+                              params::ParamsType = nothing,
+                              resolution::Integer=DEFAULT_RESOLUTION, timestepper::Symbol=DEFAULT_TIMESTEPPER,
+                              boundary::BoundaryType=nothing, verbose::Bool=false,
                               sigma_inplace::Bool=true) where {R<:AbstractRNG}
     N = length(u0)
     T = promote_type(eltype(u0), typeof(dt))
@@ -404,9 +404,9 @@ end
 Ensemble integrator using static arrays (internal).
 """
 function _evolve_ens_static(u0, dt, Nsteps, f!, sigma;
-                           params::Any = nothing,                         # <-- NEW
-                           seed::Integer=123, resolution::Integer=1,
-                           timestepper::Symbol=:rk4, boundary::Union{Nothing,Tuple}=nothing,
+                           params::ParamsType = nothing,
+                           seed::Integer=DEFAULT_SEED, resolution::Integer=DEFAULT_RESOLUTION,
+                           timestepper::Symbol=DEFAULT_TIMESTEPPER, boundary::BoundaryType=nothing,
                            n_ens::Integer=1, rng::Union{Nothing,AbstractRNG}=nothing,
                            verbose::Bool=false, sigma_inplace::Bool=true)
     N = length(u0)
@@ -416,7 +416,7 @@ function _evolve_ens_static(u0, dt, Nsteps, f!, sigma;
 
     Threads.@threads :static for ens_idx in 1:n_ens   # <-- static scheduling
         # Faster per-thread RNG
-        seed_val  = (rng === nothing) ? (seed + ens_idx * 1000) : rand(rng, UInt)
+        seed_val  = (rng === nothing) ? (seed + ens_idx * ENSEMBLE_SEED_OFFSET) : rand(rng, UInt)
         local_rng = Random.TaskLocalRNG()
         Random.seed!(local_rng, seed_val)
 

@@ -4,7 +4,7 @@
 
 # Default cutoff between StaticArrays and the dynamic path.
 # Can be adjusted at runtime via `set_static_threshold!(N)`.
-const _STATIC_THRESHOLD = Ref(64)
+const _STATIC_THRESHOLD = Ref(DEFAULT_STATIC_THRESHOLD)
 
 """
     set_static_threshold!(N::Integer)
@@ -82,18 +82,15 @@ traj = evolve(u0, 0.01, 1000, f!, sigma; timestepper=:rk4, resolution=10)
 ```
 """
 function evolve(u0::AbstractVector, dt, Nsteps::Integer, f!, sigma;
-                params::Any = nothing,
-                seed::Integer=123, resolution::Integer=1, n_burnin::Integer=0,
-                timestepper::Symbol=:euler, boundary::Union{Nothing,Tuple}=nothing,
+                params::ParamsType = nothing,
+                seed::Integer=DEFAULT_SEED, resolution::Integer=DEFAULT_RESOLUTION, n_burnin::Integer=0,
+                timestepper::Symbol=DEFAULT_TIMESTEPPER, boundary::BoundaryType=nothing,
                 n_ens::Integer=1, rng::Union{Nothing,AbstractRNG}=nothing,
                 verbose::Bool=false, flatten::Bool=true, manage_blas_threads::Bool=true,
                 sigma_inplace::Bool=true, batched_drift::Bool=false)
 
     # Input validation
-    dt <= 0 && throw(ArgumentError("dt must be > 0, got $dt"))
-    resolution < 1 && throw(ArgumentError("resolution must be ≥ 1, got $resolution"))
-    n_burnin < 0 && throw(ArgumentError("n_burnin must be ≥ 0, got $n_burnin"))
-    n_burnin >= Nsteps && throw(ArgumentError("n_burnin must be < Nsteps, got n_burnin=$n_burnin, Nsteps=$Nsteps"))
+    validate_inputs(u0, dt, Nsteps; resolution, n_burnin)
 
     N = length(u0)
     if n_ens != 1
@@ -185,16 +182,15 @@ ens = evolve_ens(u0, 0.01, 1000, f!, sigma; n_ens=8, resolution=10)
 ```
 """
 function evolve_ens(u0::AbstractVector, dt, Nsteps::Integer, f!, sigma;
-                    params::Any = nothing,                       # <-- NEW
-                    seed::Integer=123, resolution::Integer=1,
-                    timestepper::Symbol=:rk4, boundary::Union{Nothing,Tuple}=nothing,
+                    params::ParamsType = nothing,
+                    seed::Integer=DEFAULT_SEED, resolution::Integer=DEFAULT_RESOLUTION,
+                    timestepper::Symbol=:rk4, boundary::BoundaryType=nothing,
                     n_ens::Integer=1, rng::Union{Nothing,AbstractRNG}=nothing,
                     verbose::Bool=false, manage_blas_threads::Bool=true,
                     sigma_inplace::Bool=true, batched_drift::Bool=false)
 
     # Input validation
-    dt <= 0 && throw(ArgumentError("dt must be > 0, got $dt"))
-    resolution < 1 && throw(ArgumentError("resolution must be ≥ 1, got $resolution"))
+    validate_inputs(u0, dt, Nsteps; resolution, n_burnin=0)
 
     if batched_drift
         return _evolve_ens_batched(u0, dt, Nsteps, f!, sigma;
