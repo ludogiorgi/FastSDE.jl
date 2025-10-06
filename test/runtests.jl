@@ -130,6 +130,109 @@ build_sigma_matrix(N::Int, σx::Float64) = (u, t) -> Matrix(I, N, N) .* σx
         val = set_static_threshold!(64)
         @test val == 64
     end
+
+    @testset "In-place sigma! - vector form (static path)" begin
+        set_static_threshold!(1000)  # force static
+        N = 4
+        u0 = randn(N)
+        dt = 0.01
+        Nsteps = 100
+        resolution = 10
+
+        # Drift with params
+        f_with_p!(du, u, p, t) = (du .= -p.decay * u)
+
+        # In-place vector sigma! that scales by state magnitude
+        params = (σ_base = 0.1, decay = 1.0)
+        function sigma_inplace_vec!(σ_vec, u, p, t)
+            @. σ_vec = p.σ_base * (1.0 + 0.1 * abs(u[1]))
+            return nothing
+        end
+
+        traj = evolve(u0, dt, Nsteps, f_with_p!, sigma_inplace_vec!;
+                      params=params, resolution=resolution, sigma_inplace=true)
+        @test size(traj) == (N, fld(Nsteps, resolution) + 1)
+        # Verify it's not identical to constant sigma (should differ due to state dependence)
+        traj_const = evolve(u0, dt, Nsteps, f_with_p!, 0.1;
+                            params=(decay=1.0,), resolution=resolution, seed=123)
+        @test traj != traj_const  # Should differ due to state-dependent scaling
+    end
+
+    @testset "In-place sigma! - matrix form (dynamic path)" begin
+        set_static_threshold!(1)  # force dynamic
+        N = 5
+        u0 = randn(N)
+        dt = 0.01
+        Nsteps = 100
+        resolution = 10
+
+        # Drift with params
+        f_with_p!(du, u, p, t) = (du .= -p.decay * u)
+
+        # In-place matrix sigma! with state-dependent correlation
+        params = (σ_scale = 0.15, decay = 1.0)
+        function sigma_inplace_mat!(Σ_mat, u, p, t)
+            # Fill diagonal with scale
+            for i in 1:size(Σ_mat, 1)
+                for j in 1:size(Σ_mat, 2)
+                    Σ_mat[i,j] = (i == j) ? p.σ_scale : 0.0
+                end
+            end
+            return nothing
+        end
+
+        traj = evolve(u0, dt, Nsteps, f_with_p!, sigma_inplace_mat!;
+                      params=params, resolution=resolution, sigma_inplace=true)
+        @test size(traj) == (N, fld(Nsteps, resolution) + 1)
+    end
+
+    @testset "Input validation errors" begin
+        set_static_threshold!(1)
+        N = 3
+        u0 = randn(N)
+        sigma = 0.1
+
+        # Test negative dt
+        @test_throws ArgumentError evolve(u0, -0.01, 100, linear_decay!, sigma)
+
+        # Test zero dt
+        @test_throws ArgumentError evolve(u0, 0.0, 100, linear_decay!, sigma)
+
+        # Test invalid resolution (< 1)
+        @test_throws ArgumentError evolve(u0, 0.01, 100, linear_decay!, sigma; resolution=0)
+        @test_throws ArgumentError evolve(u0, 0.01, 100, linear_decay!, sigma; resolution=-5)
+
+        # Test negative n_burnin
+        @test_throws ArgumentError evolve(u0, 0.01, 100, linear_decay!, sigma; n_ens=2, n_burnin=-1)
+
+        # Test n_burnin >= Nsteps
+        @test_throws ArgumentError evolve(u0, 0.01, 100, linear_decay!, sigma; n_ens=2, n_burnin=100)
+        @test_throws ArgumentError evolve(u0, 0.01, 100, linear_decay!, sigma; n_ens=2, n_burnin=150)
+
+        # Same validations for evolve_ens
+        @test_throws ArgumentError evolve_ens(u0, -0.01, 100, linear_decay!, sigma; n_ens=2)
+        @test_throws ArgumentError evolve_ens(u0, 0.0, 100, linear_decay!, sigma; n_ens=2)
+        @test_throws ArgumentError evolve_ens(u0, 0.01, 100, linear_decay!, sigma; n_ens=2, resolution=0)
+    end
+
+    @testset "Static path RK2 ensemble" begin
+        set_static_threshold!(1000)  # force static
+        N = 4
+        u0 = randn(N)
+        dt = 0.01
+        Nsteps = 100
+        n_ens = 8
+
+        # Test RK2 works in static ensemble path
+        ens_rk2 = evolve_ens(u0, dt, Nsteps, linear_decay!, 0.1;
+                             timestepper=:rk2, n_ens=n_ens, resolution=10, seed=42)
+        @test size(ens_rk2) == (N, 11, n_ens)
+
+        # Test determinism
+        ens_rk2_2 = evolve_ens(u0, dt, Nsteps, linear_decay!, 0.1;
+                               timestepper=:rk2, n_ens=n_ens, resolution=10, seed=42)
+        @test ens_rk2 == ens_rk2_2
+    end
 end
 
 include("batched_ensemble.jl")

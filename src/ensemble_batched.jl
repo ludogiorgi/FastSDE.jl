@@ -44,34 +44,44 @@ function _evolve_ens_batched(u0, dt, Nsteps, f!, sigma;
     # correlated diffusion factor (optional)
     Lcorr = nothing
     if sigma isa AbstractMatrix
-        Lcorr = cholesky(Symmetric(sigma)).L
+        try
+            Lcorr = cholesky(Symmetric(sigma)).L
+        catch err
+            if err isa LinearAlgebra.PosDefException
+                throw(ArgumentError("Matrix diffusion must be SPD for batched path; Cholesky factorization failed"))
+            else
+                rethrow()
+            end
+        end
     end
 
     # optional BLAS thread mgmt (avoid nested threading if outer code threads elsewhere)
+    # In batched mode, set BLAS to 1 thread for optimal performance
+    # (batched operations already parallelize across n_ens dimension)
     old_blas = nothing
     if manage_blas_threads
         old_blas = BLAS.get_num_threads()
-        # leave as-is in batched path; users can tune externally if needed
-        BLAS.set_num_threads(old_blas)
+        BLAS.set_num_threads(1)
     end
+
+    # Hoist sqrt(dt) computation outside the loop
+    sqrt_dt = sqrt(dt)
 
     t = zero(T)
     saveidx = 2
 
     @inbounds for k in 1:Nsteps
         _batched_step!(U, DU, Tmp, Xi, K1, K2, K3, K4,
-                       f!, sigma, params, t, dt, tval,
+                       f!, sigma, params, t, dt, sqrt_dt, tval,
                        sigma_inplace, Lcorr, _rng)
 
         # optional boundary reset to initial u0 when leaving [lo, hi]
         if boundary !== nothing
             lo, hi = boundary
             for j in 1:n_ens
-                reset = false
-                @simd for i in 1:D
-                    @inbounds if (U[i,j] < lo) | (U[i,j] > hi); reset = true; end
-                end
-                reset && (@views U[:,j] .= @views out[:,1,1])
+                # Check if any element in column j crosses the boundary
+                reset = any(@inbounds (U[i,j] < lo) || (U[i,j] > hi) for i in 1:D)
+                reset && (@views U[:,j] .= @views out[:,1,j])
             end
         end
 
@@ -132,9 +142,8 @@ end
 
 # Euler–Maruyama (batched)
 @inline function _batched_step!(U, DU, Tmp, Xi, K1, K2, K3, K4,
-                                f!, sigma, p, t, dt, ::Val{:euler},
+                                f!, sigma, p, t, dt, sqrt_dt, ::Val{:euler},
                                 sigma_inplace, Lcorr, rng)
-    sqrt_dt = sqrt(dt)
     f!(DU, U, p, t)
     if sigma_inplace === true && sigma isa Function
         _noise_inplace!(rng, Xi, sigma, U, p, t, sqrt_dt)
@@ -147,9 +156,8 @@ end
 
 # RK2 (deterministic Heun) + EM noise
 @inline function _batched_step!(U, DU, Tmp, Xi, K1, K2, K3, K4,
-                                f!, sigma, p, t, dt, ::Val{:rk2},
+                                f!, sigma, p, t, dt, sqrt_dt, ::Val{:rk2},
                                 sigma_inplace, Lcorr, rng)
-    sqrt_dt = sqrt(dt)
     f!(K1, U, p, t)
     @. Tmp = U + 0.5 * dt * K1
     f!(K2, Tmp, p, t)
@@ -165,9 +173,8 @@ end
 
 # RK4 (deterministic) + EM noise
 @inline function _batched_step!(U, DU, Tmp, Xi, K1, K2, K3, K4,
-                                f!, sigma, p, t, dt, ::Val{:rk4},
+                                f!, sigma, p, t, dt, sqrt_dt, ::Val{:rk4},
                                 sigma_inplace, Lcorr, rng)
-    sqrt_dt = sqrt(dt)
     f!(K1, U, p, t)
     @. Tmp = U + 0.5 * dt * K1
     f!(K2, Tmp, p, t)

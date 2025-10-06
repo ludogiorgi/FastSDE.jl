@@ -5,6 +5,11 @@
 using Random
 using LinearAlgebra: mul!, BLAS
 
+# --- Constants ---
+
+# Threshold for switching to BLAS operations in dynamic path
+const _BLAS_SWITCH_THRESHOLD = 256
+
 # --- Call shims (params or no params) ---
 
 # --- Utilities ---
@@ -36,7 +41,7 @@ Fourth-order Runge–Kutta deterministic step (internal, dynamic arrays).
 """
 function _rk4_step!(u, dt, f!, t, params, k1, k2, k3, k4, tmp)
     _call_f!(f!, k1, u, t, params)
-    if length(u) >= 256
+    if length(u) >= _BLAS_SWITCH_THRESHOLD
         @inbounds copyto!(tmp, u); BLAS.axpy!(0.5 * dt, k1, tmp)
     else
         @inbounds @simd for i in eachindex(u, tmp, k1)
@@ -45,7 +50,7 @@ function _rk4_step!(u, dt, f!, t, params, k1, k2, k3, k4, tmp)
     end
     _call_f!(f!, k2, tmp, t + 0.5 * dt, params)
 
-    if length(u) >= 256
+    if length(u) >= _BLAS_SWITCH_THRESHOLD
         @inbounds copyto!(tmp, u); BLAS.axpy!(0.5 * dt, k2, tmp)
     else
         @inbounds @simd for i in eachindex(u, tmp, k2)
@@ -54,7 +59,7 @@ function _rk4_step!(u, dt, f!, t, params, k1, k2, k3, k4, tmp)
     end
     _call_f!(f!, k3, tmp, t + 0.5 * dt, params)
 
-    if length(u) >= 256
+    if length(u) >= _BLAS_SWITCH_THRESHOLD
         @inbounds copyto!(tmp, u); BLAS.axpy!(dt, k3, tmp)
     else
         @inbounds @simd for i in eachindex(u, tmp, k3)
@@ -63,7 +68,7 @@ function _rk4_step!(u, dt, f!, t, params, k1, k2, k3, k4, tmp)
     end
     _call_f!(f!, k4, tmp, t + dt, params)
 
-    if length(u) >= 256
+    if length(u) >= _BLAS_SWITCH_THRESHOLD
         BLAS.axpy!(dt/6, k1, u)
         BLAS.axpy!(dt/3, k2, u)
         BLAS.axpy!(dt/3, k3, u)
@@ -81,7 +86,7 @@ Second-order Runge–Kutta (midpoint) deterministic step (internal, dynamic arra
 """
 function _rk2_step!(u, dt, f!, t, params, k1, k2, tmp)
     _call_f!(f!, k1, u, t, params)
-    if length(u) >= 256
+    if length(u) >= _BLAS_SWITCH_THRESHOLD
         @inbounds copyto!(tmp, u); BLAS.axpy!(0.5 * dt, k1, tmp)
     else
         @inbounds @simd for i in eachindex(u, tmp, k1)
@@ -89,7 +94,7 @@ function _rk2_step!(u, dt, f!, t, params, k1, k2, tmp)
         end
     end
     _call_f!(f!, k2, tmp, t + 0.5 * dt, params)
-    if length(u) >= 256
+    if length(u) >= _BLAS_SWITCH_THRESHOLD
         BLAS.axpy!(dt, k2, u)
     else
         @inbounds @simd for i in eachindex(u, k2)
@@ -104,7 +109,7 @@ Euler deterministic step (internal, dynamic arrays).
 """
 function _euler_step!(u, dt, f!, t, params, k1)
     _call_f!(f!, k1, u, t, params)
-    if length(u) >= 256
+    if length(u) >= _BLAS_SWITCH_THRESHOLD
         BLAS.axpy!(dt, k1, u)
     else
         @inbounds @simd for i in eachindex(u, k1)

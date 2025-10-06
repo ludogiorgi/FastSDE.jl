@@ -1,8 +1,13 @@
+import Pkg
+Pkg.activate(@__DIR__)        # use benchmarks/Project.toml
+Pkg.instantiate() 
+
 using FastSDE, Flux, Random
+
 
 Random.seed!(0)
 
-D, N = 8, 8192
+D, N = 8, 100
 nn = Chain(Dense(D,128,gelu), Dense(128,D))
 p  = (nn = nn,)
 
@@ -12,10 +17,10 @@ f_nn_batched!(DU, U, p, t) = (DU .= p.nn(U))
 u0 = randn(D)
 σ  = 0.15
 dt = 1e-3
-steps = 50_000
+steps = 5000
 
-ens = evolve_ens(u0, dt, steps, f_nn_batched!, σ;
-                 params=p, n_ens=N, resolution=200,
+@time ens = evolve(u0, dt, steps, f_nn_batched!, σ;
+                 params=p, n_ens=N, resolution=200, boundary=(-10, 10),
                  batched_drift=true, manage_blas_threads=true)
 
 @show size(ens)  # (D, Nsave, N)

@@ -5,6 +5,7 @@ Fast, minimalist SDE integrator for Julia using the Euler–Maruyama scheme with
 ## Features
 
 - **Multiple time-steppers**: Euler, 2nd-order Runge–Kutta (RK2), and 4th-order Runge–Kutta (RK4)
+  - **Note on stochastic order**: When using SDE integration, the stochastic component uses Euler–Maruyama regardless of the deterministic time-stepper. This means the strong convergence order remains 0.5 even when using RK2 or RK4 for the drift term. Higher-order time-steppers improve accuracy of the deterministic component but do not increase the stochastic convergence order.
 - **Automatic dispatch**: StaticArrays for small systems (≤ 64 dimensions by default), dynamic arrays with BLAS acceleration for larger systems
 - **Parameter support**: Pass parameters explicitly to drift and diffusion functions
 - **Flexible noise**: Scalar, diagonal (vector), or correlated (matrix) diffusion
@@ -177,6 +178,34 @@ ens = evolve_ens(u0, 1e-3, 100_000, f_nn_batched!, σ;
 ```
 
 This issues large BLAS ops (CPU) or GPU kernels instead of `n_ens` small calls, giving a substantial speedup for ML-based drifts. Noise types `Number` (additive), `Vector` (diagonal), `Matrix` (correlated via cached Cholesky), and in‑place `sigma!(Ξ,U,p,t)` with `sigma_inplace=true` are supported exactly as in the columnwise path.
+
+#### Batched diffusion (in-place)
+
+When using `batched_drift=true` with an in-place diffusion function, the signature must be:
+
+```julia
+sigma!(Xi, U, p, t)
+```
+
+where:
+- `Xi` is a `(D, n_ens)` matrix pre-filled with `N(0,1)` samples
+- `U` is the current state matrix `(D, n_ens)`
+- The function must transform `Xi` in-place to `Σ^{1/2}(U,t) * Xi`
+
+Example with state-dependent diagonal diffusion:
+
+```julia
+# Xi will be modified in-place: Xi[i,j] ← σ(U[i,j]) * Xi[i,j]
+function sigma_batched!(Xi, U, p, t)
+    @. Xi = p.sigma_scale * sqrt(abs(U)) * Xi
+    return nothing
+end
+
+ens = evolve_ens(u0, dt, Nsteps, f_batched!, sigma_batched!;
+                 params=(sigma_scale=0.1,), n_ens=256, batched_drift=true, sigma_inplace=true)
+```
+
+**Note**: Callable (returning) sigma forms are not yet supported in batched mode unless they return a scalar, vector, or constant matrix.
 
 ## License
 

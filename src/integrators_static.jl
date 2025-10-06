@@ -446,6 +446,19 @@ function _evolve_ens_static(u0, dt, Nsteps, f!, sigma;
                         next_save += resolution
                     end
                 end
+            elseif timestepper === :rk2
+                @inbounds for step in 1:Nsteps
+                    _rk2_step_static!(u, T(dt), f!, t, params, k1, k2, tmp)
+                    noise!(u, s, t, local_rng, ξ, z)
+                    t += dt
+                    if step == next_save
+                        save_idx += 1
+                        @inbounds @simd for i in 1:N
+                            results[i, save_idx, ens_idx] = u[i]
+                        end
+                        next_save += resolution
+                    end
+                end
             else
                 @inbounds for step in 1:Nsteps
                     _euler_step_static!(u, T(dt), f!, t, params, k1)
@@ -466,6 +479,25 @@ function _evolve_ens_static(u0, dt, Nsteps, f!, sigma;
             if timestepper === :rk4
                 @inbounds for step in 1:Nsteps
                     _rk4_step_static!(u, T(dt), f!, t, params, k1, k2, k3, k4, tmp)
+                    noise!(u, s, t, local_rng, ξ, z)
+                    t += dt
+                    if @inbounds any(u[i] < lo || u[i] > hi for i in 1:N)
+                        @inbounds @simd for i in 1:N
+                            u[i] = u0[i]
+                        end
+                        count += 1
+                    end
+                    if step == next_save
+                        save_idx += 1
+                        @inbounds @simd for i in 1:N
+                            results[i, save_idx, ens_idx] = u[i]
+                        end
+                        next_save += resolution
+                    end
+                end
+            elseif timestepper === :rk2
+                @inbounds for step in 1:Nsteps
+                    _rk2_step_static!(u, T(dt), f!, t, params, k1, k2, tmp)
                     noise!(u, s, t, local_rng, ξ, z)
                     t += dt
                     if @inbounds any(u[i] < lo || u[i] > hi for i in 1:N)
